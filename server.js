@@ -8,6 +8,7 @@ import { scanApi } from './src/scanners/apiScanner.js';
 import { scanVuln } from './src/scanners/vulnScanner.js';
 import { scanRender } from './src/scanners/renderScanner.js';
 import { scanCode, entriesFromZip } from './src/scanners/codeScanner.js';
+import { scanCodeAudit } from './src/scanners/codeAuditScanner.js';
 import { scanApiFuzz } from './src/scanners/apiFuzzScanner.js';
 import { scanAccess } from './src/scanners/accessScanner.js';
 import { scanApiSpec } from './src/scanners/apiSpecScanner.js';
@@ -216,8 +217,19 @@ app.post('/api/scan/files', upload.any(), async (req, res) => {
     if (!entries.length) return res.status(400).json({ ok: false, error: 'No analyzable files found in the upload.' });
 
     const scan = await scanCode(entries);
-    const section = { category: 'code', label: 'Source code', meta: scan.meta, findings: scan.findings };
-    res.json(buildReport('code', [section], { files: files.length }));
+    const sections = [{ category: 'code', label: 'Source code', meta: scan.meta, findings: scan.findings }];
+    // Native static-analysis audits (quality, frontend, config, testing, hygiene).
+    try {
+      const audit = scanCodeAudit(entries);
+      sections.push(
+        { category: 'quality', label: 'Code quality', meta: {}, findings: audit.quality },
+        { category: 'frontend', label: 'Frontend quality', meta: {}, findings: audit.frontend },
+        { category: 'config', label: 'Config & DevOps', meta: {}, findings: audit.config },
+        { category: 'testing', label: 'Testing', meta: {}, findings: audit.testing },
+        { category: 'hygiene', label: 'Project hygiene', meta: {}, findings: audit.hygiene }
+      );
+    } catch (e) { /* audit is best-effort; core code scan already succeeded */ }
+    res.json(buildReport('code', sections, { files: files.length }));
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }

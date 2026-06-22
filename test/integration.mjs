@@ -8,6 +8,7 @@ import { scanApiFuzz } from '../src/scanners/apiFuzzScanner.js';
 import { scanAccess } from '../src/scanners/accessScanner.js';
 import { scanApiSpec } from '../src/scanners/apiSpecScanner.js';
 import { scanAudits } from '../src/scanners/auditScanner.js';
+import { scanCodeAudit } from '../src/scanners/codeAuditScanner.js';
 import { runWithAuth, fetchWithTimeout } from '../src/scanners/util.js';
 
 let passed = 0, failed = 0;
@@ -214,6 +215,24 @@ try {
     const body = await r.json();
     assert(r.status === 200 && body.secret === 'flag{authenticated}', 'authenticated request to /secret returns the secret');
   });
+  // --- 4) Native code audits (quality / frontend / config / testing / hygiene)
+  console.log('\n[4] Code-audit static checks:');
+  const enc = (s) => Buffer.from(s);
+  const codeEntries = [
+    { path: 'package.json', buffer: enc(JSON.stringify({ name: 'demo', dependencies: { express: '^4' } })) },
+    { path: 'src/app.js', buffer: enc("import express from 'express';\nimport made from 'totally-made-up-pkg';\nconsole.log(1);console.log(2);console.log(3);console.log(4);console.log(5);\nconst u='http://localhost:3000';\nasync function f(a){return a.map(async x=>await g(x));}\n// TODO: finish\nexpress();made();\n") },
+    { path: 'src/App.jsx', buffer: enc('export default function App(){return (<div><img src="/x.png"><a target="_blank" href="/y">y</a></div>);}') },
+    { path: 'src/app.test.js', buffer: enc("test('nothing', () => {});") },
+    { path: '.env', buffer: enc('SECRET=abc123') }
+  ];
+  const ca = scanCodeAudit(codeEntries);
+  assert(ca.quality.some((f) => /hallucinated|undeclared/i.test(f.title)), 'quality: detects undeclared/AI-hallucinated import');
+  assert(ca.quality.some((f) => /await inside \.map/i.test(f.title)), 'quality: detects await inside .map()');
+  assert(ca.frontend.some((f) => /<img> without alt/i.test(f.title)), 'frontend: detects img without alt');
+  assert(ca.frontend.some((f) => /noopener/i.test(f.title)), 'frontend: detects target=_blank without noopener');
+  assert(ca.config.some((f) => /localhost/i.test(f.title)), 'config: detects hardcoded localhost');
+  assert(ca.testing.some((f) => /empty test/i.test(f.title)), 'testing: detects empty test body');
+  assert(ca.hygiene.some((f) => /\.env file/i.test(f.title)), 'hygiene: detects committed .env');
 } finally {
   server.close();
 }
