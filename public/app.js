@@ -5,8 +5,8 @@ const SEV_COLORS = {
   critical: 'var(--critical)', high: 'var(--high)', medium: 'var(--medium)',
   low: 'var(--low)', info: 'var(--info)'
 };
-const CAT_LABELS = { ui: 'UI', security: 'Security', vuln: 'Vulnerabilities', render: 'Render', api: 'API', code: 'Code', fuzz: 'Fuzzing', access: 'Access control', spec: 'API surface' };
-const CAT_ICONS = { ui: '🧩', security: '🛡️', vuln: '🎯', render: '🖥️', api: '🔌', code: '📦', fuzz: '🧬', access: '🔓', spec: '📜' };
+const CAT_LABELS = { ui: 'UI', security: 'Security', vuln: 'Vulnerabilities', render: 'Render', api: 'API', code: 'Code', fuzz: 'Fuzzing', access: 'Access control', spec: 'API surface', perf: 'Performance', a11y: 'Accessibility', seo: 'SEO' };
+const CAT_ICONS = { ui: '🧩', security: '🛡️', vuln: '🎯', render: '🖥️', api: '🔌', code: '📦', fuzz: '🧬', access: '🔓', spec: '📜', perf: '⚡', a11y: '♿', seo: '🔎' };
 
 // Parse a "Name: value" textarea into a headers object for authenticated scans.
 function parseAuthHeaders(id) {
@@ -46,11 +46,12 @@ document.getElementById('website-form').addEventListener('submit', async (e) => 
   const url = document.getElementById('website-input').value.trim();
   if (!url) return;
   const render = document.getElementById('render-toggle').checked;
+  const audits = document.getElementById('audits-toggle').checked;
   const authHeaders = parseAuthHeaders('website-auth');
-  await runScan('Testing ' + url + ' (UI · security' + (render ? ' · render' : '') + (authHeaders ? ' · authenticated' : '') + ') …', () =>
+  await runScan('Testing ' + url + ' (UI · security' + (render ? ' · render' : '') + (audits ? ' · audits' : '') + (authHeaders ? ' · authenticated' : '') + ') …', () =>
     fetch('/api/test/website', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, render, headers: authHeaders })
+      body: JSON.stringify({ url, render, audits, headers: authHeaders })
     })
   );
 });
@@ -289,6 +290,8 @@ function renderFindings() {
       <p class="f-desc"></p>
       ${f.evidence ? `<div class="f-evidence"></div>` : ''}
       ${f.remediation ? `<p class="f-fix"><strong>Fix:</strong> <span class="f-fix-text"></span></p>` : ''}
+      ${f.reproduction ? `<div class="f-repro"><div class="f-repro-head"><span>↻ Reproduce (curl)</span><button type="button" class="copy-btn">Copy</button></div><pre class="f-repro-code"></pre></div>` : ''}
+      ${f.handoff ? `<div class="f-handoff"><strong>Authorized hand-off:</strong> <code class="f-handoff-code"></code></div>` : ''}
     `;
     el.querySelector('.f-title').textContent = f.title;
     if (f.owasp) el.querySelector('.f-owasp').textContent = f.owasp;
@@ -296,6 +299,17 @@ function renderFindings() {
     el.querySelector('.f-desc').textContent = f.description;
     if (f.evidence) el.querySelector('.f-evidence').textContent = f.evidence;
     if (f.remediation) el.querySelector('.f-fix-text').textContent = f.remediation;
+    if (f.reproduction) {
+      el.querySelector('.f-repro-code').textContent = f.reproduction;
+      el.querySelector('.copy-btn').addEventListener('click', (e) => {
+        try {
+          if (navigator.clipboard) navigator.clipboard.writeText(f.reproduction).catch(() => {});
+        } catch { /* clipboard blocked */ }
+        e.target.textContent = 'Copied';
+        setTimeout(() => { e.target.textContent = 'Copy'; }, 1200);
+      });
+    }
+    if (f.handoff) el.querySelector('.f-handoff-code').textContent = f.handoff;
     container.appendChild(el);
   });
 }

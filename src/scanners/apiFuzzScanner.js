@@ -7,7 +7,8 @@
 // it cannot create or modify server-side data. It still hits the target many
 // times, so use it ONLY on systems you own or are authorized to assess.
 import { URL } from 'node:url';
-import { finding, fetchWithTimeout, normalizeUrl } from './util.js';
+import { finding, fetchWithTimeout, normalizeUrl, currentAuthHeaders } from './util.js';
+import { curl, sqlmapHandoff } from './repro.js';
 
 const OWASP_A03 = 'A03:2021 Injection';
 const OWASP_A04 = 'A04:2021 Insecure Design';
@@ -213,23 +214,25 @@ export async function scanApiFuzz(input, opts = {}) {
 
   await pool(jobs, CONCURRENCY, async ({ kind, target, payload }) => {
     let status, text = '', ctype = '';
+    const reqUrlStr = kind === 'query' ? reqUrl(u, target, payload) : u.href;
+    const reqBodyObj = kind === 'body' ? setPath(clone(bodyObj), target, bodyValue(payload)) : bodyObj;
     try {
-      let res;
-      if (kind === 'query') {
-        res = await sendRequest(reqUrl(u, target, payload), method, bodyObj, contentType);
-      } else {
-        const fuzzedBody = setPath(clone(bodyObj), target, bodyValue(payload));
-        res = await sendRequest(u.href, method, fuzzedBody, contentType);
-      }
-      ({ status, ctype, text } = res);
+      ({ status, ctype, text } = await sendRequest(reqUrlStr, method, reqBodyObj, contentType));
     } catch { return; }
 
     const loc = kind === 'query' ? `query "${target}"` : `body field "${target}"`;
-    const push = (sev, title, desc, rem, owasp) => {
+    const repro = curl(method, reqUrlStr, {
+      headers: currentAuthHeaders() || undefined,
+      body: (isWrite && reqBodyObj != null) ? JSON.stringify(reqBodyObj) : undefined
+    });
+    const push = (sev, title, desc, rem, owasp, handoff) => {
       const key = `${kind}:${target}:${title}`;
       if (seen.has(key)) return;
       seen.add(key);
-      findings.push(finding(sev, title, desc, rem, `${kind}=${target} payload=${truncate(String(payload.value))} → HTTP ${status}`, null, owasp));
+      const f = finding(sev, title, desc, rem, `${kind}=${target} payload=${truncate(String(payload.value))} → HTTP ${status}`, null, owasp);
+      f.reproduction = repro;
+      if (handoff) f.handoff = handoff;
+      findings.push(f);
     };
 
     if (payload.reflect) {
@@ -245,9 +248,11 @@ export async function scanApiFuzz(input, opts = {}) {
       return;
     }
     if (payload.detect && payload.detect(text)) {
+      const handoff = payload.tech === 'SQL injection'
+        ? sqlmapHandoff(reqUrlStr, kind === 'query' ? target : undefined) : undefined;
       push(payload.sev, `${payload.tech} (${loc})`,
         `A ${payload.tech.toLowerCase()} payload in ${loc} produced a tell-tale response, indicating the input is not safely handled.`,
-        techRemediation(payload.tech), payload.owasp);
+        techRemediation(payload.tech), payload.owasp, handoff);
       return;
     }
     // Custom payloads: judged by SQL-error tell-tales and self-reflection.
@@ -286,10 +291,15 @@ export async function scanApiFuzz(input, opts = {}) {
       try {
         const c = await confirmBooleanSql(u, param, method, bodyObj, contentType);
         if (c.confirmed) {
-          findings.unshift(finding('critical', `Confirmed SQL injection — boolean-based (query "${param}")`,
+          const probe = new URL(u.href);
+          probe.searchParams.set(param, `${u.searchParams.get(param) ?? '1'}' AND '1'='1`);
+          const f = finding('critical', `Confirmed SQL injection — boolean-based (query "${param}")`,
             'A tautology vs. contradiction injected into this parameter produced reliably different responses, confirming the input is evaluated as SQL. This is a non-destructive proof — no data was read or modified. Treat as exploitable and fix immediately.',
             'Use parameterized queries / prepared statements; this parameter is injectable.',
-            c.evidence, null, OWASP_A03));
+            c.evidence, null, OWASP_A03);
+          f.reproduction = curl(method, probe.href, { headers: currentAuthHeaders() || undefined });
+          f.handoff = sqlmapHandoff(u.href, param);
+          findings.unshift(f);
         }
       } catch { /* ignore */ }
     }

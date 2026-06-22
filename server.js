@@ -11,6 +11,7 @@ import { scanCode, entriesFromZip } from './src/scanners/codeScanner.js';
 import { scanApiFuzz } from './src/scanners/apiFuzzScanner.js';
 import { scanAccess } from './src/scanners/accessScanner.js';
 import { scanApiSpec } from './src/scanners/apiSpecScanner.js';
+import { scanAudits } from './src/scanners/auditScanner.js';
 import { scoreFindings, summarize } from './src/scanners/scoring.js';
 import { normalizeUrl, runWithAuth } from './src/scanners/util.js';
 
@@ -99,6 +100,21 @@ async function runSection(category, label, fn) {
   }
 }
 
+// Quality audits share a single page fetch but produce three sections.
+const AUDIT_LABELS = { perf: 'Performance', a11y: 'Accessibility', seo: 'SEO' };
+async function auditSections(target) {
+  try {
+    const a = await scanAudits(target);
+    return [
+      { category: 'perf', label: AUDIT_LABELS.perf, meta: a.meta, findings: a.perf },
+      { category: 'a11y', label: AUDIT_LABELS.a11y, meta: a.meta, findings: a.a11y },
+      { category: 'seo', label: AUDIT_LABELS.seo, meta: a.meta, findings: a.seo }
+    ];
+  } catch (e) {
+    return Object.keys(AUDIT_LABELS).map((c) => ({ category: c, label: AUDIT_LABELS[c], meta: {}, findings: [], error: e.message }));
+  }
+}
+
 // --- Full website test: UI health + security + render ----------------------
 app.post('/api/test/website', async (req, res) => {
   const target = req.body && req.body.url;
@@ -115,14 +131,17 @@ app.post('/api/test/website', async (req, res) => {
 
   const authHeaders = sanitizeHeaders(req.body.headers);
   const authed = Object.keys(authHeaders).length > 0;
+  const doAudits = req.body.audits !== false; // performance / a11y / SEO, on by default
 
   try {
-    const sections = await runWithAuth(authHeaders, () => Promise.all([
+    const results = await runWithAuth(authHeaders, () => Promise.all([
       runSection('ui', 'Website health & UI', () => scanUi(target)),
       runSection('security', 'Security', () => scanUrl(target)),
       runSection('vuln', 'Vulnerabilities & OWASP', () => scanVuln(target)),
-      ...(includeRender ? [runSection('render', 'JavaScript & render', () => scanRender(target, { authHeaders }))] : [])
+      ...(includeRender ? [runSection('render', 'JavaScript & render', () => scanRender(target, { authHeaders }))] : []),
+      ...(doAudits ? [auditSections(target)] : [])
     ]));
+    const sections = results.flat(); // auditSections returns an array of 3
     // If the network-dependent suites all failed (e.g. host unreachable), the
     // target couldn't be assessed — report that instead of a perfect score.
     const networkSections = sections.filter((s) => s.category !== 'render');

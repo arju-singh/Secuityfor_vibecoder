@@ -13,6 +13,7 @@
 // automatable here and remains a manual exercise (see the Learn tab methodology).
 import { URL } from 'node:url';
 import { finding, fetchWithTimeout, normalizeUrl, currentAuthHeaders } from './util.js';
+import { curl } from './repro.js';
 
 const A01 = 'A01:2021 Broken Access Control';
 const A04 = 'A04:2021 Insecure Design';
@@ -66,10 +67,12 @@ async function probeIdor(u, authed, hasAuth) {
 
   const where = id.kind === 'query' ? `parameter "${id.key}"` : 'a path segment';
   // Higher confidence when we're authenticated (objects are likely user-scoped).
-  return finding(hasAuth ? 'medium' : 'low', `Possible IDOR via ${where}`,
+  const f = finding(hasAuth ? 'medium' : 'low', `Possible IDOR via ${where}`,
     `Changing the object ID (${id.val} → ${neighborId}) returned a different valid object, while an out-of-range ID (${farId}) was not found — sequential IDs are directly addressable. If these objects belong to other users and aren't authorization-checked, this is an IDOR. Confirm with a second account.`,
     'Enforce per-object authorization (the caller must be allowed the specific object), and use unguessable IDs (UUIDs) as defense-in-depth.',
     `ids tested: ${id.val} (orig), ${neighborId} (HTTP ${neighbor.status}), ${farId} (HTTP ${far.status})`, null, A01);
+  f.reproduction = curl('GET', withId(u, neighborId, id), { headers: currentAuthHeaders() || undefined });
+  return f;
 }
 
 // 401/403 bypass attempts — header spoofing and path mutations that a real
@@ -88,10 +91,14 @@ async function probeAuthBypass(u, baseline) {
   for (const h of headerSets) {
     try {
       const r = await get(u.href, { headers: h, noAuth: true });
-      if (r.status === 200) return [finding('high', 'Authorization bypass via request header',
-        `The endpoint returned 401/403 normally but 200 when sent the header ${JSON.stringify(h)}. A trusted-header check can be spoofed by anyone, bypassing access control.`,
-        'Never trust client-supplied headers (X-Forwarded-*, X-Original-URL, etc.) for authorization; enforce auth in application logic.',
-        `${JSON.stringify(h)} → HTTP 200 (baseline ${baseline.status})`, null, A01)];
+      if (r.status === 200) {
+        const f = finding('high', 'Authorization bypass via request header',
+          `The endpoint returned 401/403 normally but 200 when sent the header ${JSON.stringify(h)}. A trusted-header check can be spoofed by anyone, bypassing access control.`,
+          'Never trust client-supplied headers (X-Forwarded-*, X-Original-URL, etc.) for authorization; enforce auth in application logic.',
+          `${JSON.stringify(h)} → HTTP 200 (baseline ${baseline.status})`, null, A01);
+        f.reproduction = curl('GET', u.href, { headers: h });
+        return [f];
+      }
     } catch { /* ignore */ }
   }
   const pathVariants = [u.pathname + '/', u.pathname + '/.', u.pathname.toUpperCase(), u.pathname + '%2f', '/%2e' + u.pathname];
@@ -99,10 +106,14 @@ async function probeAuthBypass(u, baseline) {
     try {
       const t = new URL(u.href); t.pathname = pv;
       const r = await get(t.href, { noAuth: true });
-      if (r.status === 200) return [finding('high', 'Authorization bypass via path mutation',
-        `The endpoint returned 401/403 for ${u.pathname} but 200 for the equivalent path "${pv}". Path-based access rules can be bypassed with encoding/normalisation tricks.`,
-        'Normalise the request path before applying access rules; enforce authorization in the application, not just at the proxy/path layer.',
-        `${pv} → HTTP 200 (baseline ${baseline.status})`, null, A01)];
+      if (r.status === 200) {
+        const f = finding('high', 'Authorization bypass via path mutation',
+          `The endpoint returned 401/403 for ${u.pathname} but 200 for the equivalent path "${pv}". Path-based access rules can be bypassed with encoding/normalisation tricks.`,
+          'Normalise the request path before applying access rules; enforce authorization in the application, not just at the proxy/path layer.',
+          `${pv} → HTTP 200 (baseline ${baseline.status})`, null, A01);
+        f.reproduction = curl('GET', t.href);
+        return [f];
+      }
     } catch { /* ignore */ }
   }
   return [];

@@ -7,6 +7,7 @@ import express from 'express';
 import { scanApiFuzz } from '../src/scanners/apiFuzzScanner.js';
 import { scanAccess } from '../src/scanners/accessScanner.js';
 import { scanApiSpec } from '../src/scanners/apiSpecScanner.js';
+import { scanAudits } from '../src/scanners/auditScanner.js';
 import { runWithAuth, fetchWithTimeout } from '../src/scanners/util.js';
 
 let passed = 0, failed = 0;
@@ -75,6 +76,13 @@ app.get('/protected', (req, res) => {
   if (req.get('x-forwarded-for') === '127.0.0.1') return res.json({ secret: 'you bypassed the gate' });
   res.status(403).json({ error: 'forbidden' });
 });
+
+// A page with deliberate quality issues (no label, zoom disabled, no meta desc).
+app.get('/page', (req, res) => res.type('html').send(
+  '<!doctype html><html lang="en"><head>' +
+  '<meta name="viewport" content="width=device-width, user-scalable=no">' +
+  '<title>Hi</title></head><body>' +
+  '<form><input type="text" name="q"></form><a href="/x"></a><h1>T</h1></body></html>'));
 
 // A minimal OpenAPI spec describing two GET endpoints.
 app.get('/openapi.json', (req, res) => res.json({
@@ -150,6 +158,9 @@ try {
   console.log('\n[2e2] Boolean-based SQLi confirmation (non-destructive PoC):');
   const confirmed = await scanApiFuzz(`${base}/items?id=1`);
   assert(confirmed.findings.some((f) => /Confirmed SQL injection — boolean-based/.test(f.title)), 'confirms boolean-based SQLi without extracting data');
+  const cf = confirmed.findings.find((f) => /Confirmed SQL injection/.test(f.title));
+  assert(cf && /^curl /.test(cf.reproduction || ''), 'confirmed finding carries a curl reproduction');
+  assert(cf && /sqlmap/.test(cf.handoff || ''), 'confirmed finding carries a sqlmap hand-off command');
   const noFp = await scanApiFuzz(`${base}/safe-items?id=1`);
   assert(!noFp.findings.some((f) => /Confirmed SQL injection/.test(f.title)), 'no false confirmation on a non-injectable endpoint');
 
@@ -185,6 +196,14 @@ try {
   assert(spec.findings.some((f) => /OpenAPI spec discovered/i.test(f.title)), 'discovers & parses the OpenAPI spec');
   assert(spec.meta.getEndpoints === 2, 'enumerates the documented GET endpoints');
   assert(spec.findings.some((f) => /without authentication/i.test(f.title)), 'flags documented endpoints reachable without auth');
+
+  // --- 2l) Quality audits: performance / accessibility / SEO ---------------
+  console.log('\n[2l] Quality audits (perf / a11y / SEO):');
+  const aud = await scanAudits(`${base}/page`);
+  assert(aud.a11y.some((f) => /without an accessible label/i.test(f.title)), 'a11y: detects unlabeled form field');
+  assert(aud.a11y.some((f) => /Pinch-zoom disabled/i.test(f.title)), 'a11y: detects disabled zoom');
+  assert(aud.seo.some((f) => /Missing meta description/i.test(f.title)), 'seo: detects missing meta description');
+  assert(aud.perf.some((f) => /not compressed/i.test(f.title)), 'perf: detects missing compression');
 
   // --- 3) Authenticated scanning actually sends credentials ----------------
   console.log('\n[3] Authenticated scanning sends auth headers end-to-end:');
