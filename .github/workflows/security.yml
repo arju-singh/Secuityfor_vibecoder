@@ -1,0 +1,111 @@
+name: Security & Quality CI
+
+# Runs the real external scanners (the "full depth" engines that aren't bundled
+# into the app) plus SentryScan's own integration test, on every push and PR.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # SentryScan's own 39-assertion integration suite.
+  integration-test:
+    name: Integration test (npm test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  # Dependency CVEs — npm's own advisory database.
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Audit dependencies (high+ severity)
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+  # Secret detection across the full git history (Gitleaks).
+  gitleaks:
+    name: Gitleaks secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so leaked-then-removed secrets are caught
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITLEAKS_LICENSE only needed for private/org repos.
+
+  # Filesystem CVE + misconfig + secret scan (Trivy).
+  trivy:
+    name: Trivy filesystem scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Trivy (vuln, secret, misconfig)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '0'   # report, don't fail the build (tighten to '1' to gate)
+
+  # ESLint — runs only if the project has an ESLint config.
+  eslint:
+    name: ESLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run ESLint if configured
+        run: |
+          if ls .eslintrc* eslint.config.* >/dev/null 2>&1; then
+            npx --yes eslint . || true
+          else
+            echo "No ESLint config found — skipping. Add eslint.config.js to enable."
+          fi
+
+  # Google Lighthouse against the running app (perf, a11y, SEO, best-practices).
+  lighthouse:
+    name: Lighthouse
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Start server
+        run: |
+          npm start &
+          npx --yes wait-on http://localhost:3000 -t 30000
+      - name: Run Lighthouse
+        uses: treosh/lighthouse-ci-action@v12
+        with:
+          urls: http://localhost:3000
+          uploadArtifacts: true
+          temporaryPublicStorage: true

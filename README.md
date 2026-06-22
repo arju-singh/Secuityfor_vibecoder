@@ -1,5 +1,7 @@
 # SentryScan — Website Tester
 
+[![Security & Quality CI](https://github.com/arju-singh/Secuityfor_vibecoder/actions/workflows/security.yml/badge.svg)](https://github.com/arju-singh/Secuityfor_vibecoder/actions/workflows/security.yml)
+
 A full-stack web app to test any website across four dimensions — UI health, API behavior, security, and live JavaScript rendering — plus a source-code scanner. Three modes:
 
 1. **Test a website** (URL) — runs four suites and merges the results:
@@ -45,6 +47,19 @@ npm run dev
 ```
 
 The server listens on `PORT` (default `3000`).
+
+## Continuous Integration
+
+`.github/workflows/security.yml` runs on every push/PR and wires in the real external engines that aren't bundled into the app:
+
+- **Integration test** — SentryScan's own 39-assertion suite (`npm test`)
+- **npm audit** — dependency advisories
+- **Gitleaks** — secret scan across full git history
+- **Trivy** — filesystem vuln + secret + misconfig scan
+- **ESLint** — runs if an ESLint config is present (else skipped)
+- **Lighthouse** — boots the app and audits performance / a11y / SEO / best-practices
+
+Scanner steps are non-gating by default (they report); the integration test gates the build. Tighten `exit-code`/`continue-on-error` to make any scanner block merges.
 
 ## How it works
 
