@@ -67,6 +67,7 @@ jobs:
           scanners: vuln,secret,misconfig
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+          skip-dirs: node_modules,test   # test/ holds intentional fake-secret fixtures
           exit-code: '0'   # report, don't fail the build (tighten to '1' to gate)
 
   # ESLint — runs only if the project has an ESLint config.

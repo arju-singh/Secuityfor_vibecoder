@@ -1,0 +1,19 @@
+# Gitleaks config for SentryScan.
+# Extends the default rules and allowlists the intentional FAKE credentials used
+# by the integration test (test/integration.mjs) so CI stays clean. These are
+# not real secrets — they are fixtures for a vulnerable in-memory test server.
+
+title = "SentryScan Gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Intentional test fixtures (fake credentials)"
+paths = [
+  '''test/.*''',
+]
+regexes = [
+  '''good-token''',
+  '''SECRET=abc123''',
+]
