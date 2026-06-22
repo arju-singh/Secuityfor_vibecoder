@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SentryScan — Website Tester</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">🛡️</span>
+      <div>
+        <h1>SentryScan</h1>
+        <p class="tagline">Test any website — UI · API · security · render</p>
+      </div>
+    </div>
+    <a class="ghost-link" href="#how">How it works</a>
+  </header>
+
+  <main class="container">
+    <section class="intro">
+      <h2>Test any website like a pro.</h2>
+      <p>Point it at a URL to check what breaks in the UI, whether the API works, what could be hacked, and whether the page renders without JavaScript errors — or upload your source code to find leaked keys and vulnerable dependencies.</p>
+    </section>
+
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="website" role="tab">🌐 Test a website</button>
+      <button class="tab" data-tab="api" role="tab">🔌 Test an API</button>
+      <button class="tab" data-tab="code" role="tab">📦 Scan source code</button>
+      <button class="tab" data-tab="learn" role="tab">🎓 Learn &amp; roadmap</button>
+      <button class="tab" data-tab="history" role="tab">🕘 History</button>
+    </div>
+
+    <!-- Website panel -->
+    <section class="panel active" id="panel-website">
+      <form id="website-form" class="url-form">
+        <input type="text" id="website-input" placeholder="saucedemo.com  or  https://the-internet.herokuapp.com" autocomplete="off" spellcheck="false" />
+        <button type="submit">Run test</button>
+      </form>
+      <label class="check"><input type="checkbox" id="render-toggle" checked /> Include live JavaScript / render test (headless browser)</label>
+      <details class="auth-box">
+        <summary>🔐 Authenticated scan (optional)</summary>
+        <p class="auth-hint">Send these headers with every request so the scanner tests pages as a logged-in user. One per line — e.g. <code>Authorization: Bearer …</code> or <code>Cookie: session=…</code>. Only use credentials you own.</p>
+        <textarea id="website-auth" class="auth-input" rows="3" spellcheck="false" placeholder="Authorization: Bearer eyJhbGci...&#10;Cookie: session_id=abc123"></textarea>
+        <div class="profile-row" data-target="website-auth">
+          <select class="profile-select"><option value="">— saved profiles —</option></select>
+          <button type="button" class="profile-apply link-btn">Apply</button>
+          <input type="text" class="profile-name" placeholder="name to save" />
+          <button type="button" class="profile-save link-btn">Save</button>
+          <button type="button" class="profile-del link-btn">Delete</button>
+        </div>
+      </details>
+      <p class="hint">Runs four suites: <strong>UI health</strong> (load, broken links/resources, titles, forms, accessibility) · <strong>Security</strong> (headers, TLS, cookies, exposed files) · <strong>Vulnerabilities &amp; OWASP</strong> (CSP/SRI weaknesses, outdated libraries, TRACE/XST, CORS reflection, open redirect, unsafe HTTP methods, exposed dev/debug endpoints, GraphQL introspection, directory listing, data exposure, reflected-input &amp; SQL-error probes — mapped to the OWASP Top 10) · <strong>Render</strong> (JS console errors, failed requests, blank-page detection).</p>
+      <div class="presets">
+        <p class="presets-label">Try a known practice site:</p>
+        <div class="preset-chips" data-target="website-input"></div>
+      </div>
+    </section>
+
+    <!-- API panel -->
+    <section class="panel" id="panel-api">
+      <form id="api-form" class="url-form">
+        <input type="text" id="api-input" placeholder="https://jsonplaceholder.typicode.com/posts/1" autocomplete="off" spellcheck="false" />
+        <button type="submit">Test endpoint</button>
+      </form>
+      <p class="hint">Checks: reachability · status code · response time · JSON validity · content-type · CORS · supported methods · auth behavior · HTTPS.</p>
+      <label class="check"><input type="checkbox" id="fuzz-toggle" /> Fuzz query parameters (sends crafted inputs — SQLi, XSS, path traversal, command injection, SSTI — to each parameter)</label>
+      <label class="check"><input type="checkbox" id="enumerate-toggle" /> Enumerate endpoints from the API's OpenAPI/Swagger spec</label>
+      <label class="check"><input type="checkbox" id="ratelimit-toggle" /> Test rate limiting (sends a burst of requests)</label>
+      <details class="auth-box" id="fuzz-advanced">
+        <summary>🧬 Advanced: fuzz a request body (POST/PUT/PATCH)</summary>
+        <p class="auth-hint">Fuzz the fields of a JSON request body. Requires the fuzz checkbox above.</p>
+        <div class="fuzz-row">
+          <select id="fuzz-method" class="fuzz-select">
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+            <option value="PUT">PUT</option>
+            <option value="PATCH">PATCH</option>
+            <option value="DELETE">DELETE</option>
+          </select>
+          <span class="auth-hint" style="margin:0">Content-Type: application/json</span>
+        </div>
+        <textarea id="fuzz-body" class="auth-input" rows="3" spellcheck="false" placeholder='{"username": "admin", "password": "test"}'></textarea>
+        <label class="check danger-check"><input type="checkbox" id="fuzz-allow-write" /> ⚠ Allow destructive (write) requests — POST/PUT/PATCH/DELETE can create or modify data. Only enable on systems you own or are authorized to test.</label>
+        <p class="auth-hint" style="margin-top:10px">Custom payloads (optional, one per line) — added to the built-in set and checked for SQL errors &amp; reflection:</p>
+        <textarea id="fuzz-payloads" class="auth-input" rows="2" spellcheck="false" placeholder="' OR sleep(5)--&#10;{{config}}&#10;../../../../windows/win.ini"></textarea>
+      </details>
+      <details class="auth-box">
+        <summary>🔐 Authenticated request (optional)</summary>
+        <p class="auth-hint">Headers sent with every request — one per line, e.g. <code>Authorization: Bearer …</code> or an API key header. Only use credentials you own.</p>
+        <textarea id="api-auth" class="auth-input" rows="2" spellcheck="false" placeholder="Authorization: Bearer eyJhbGci...&#10;X-API-Key: ..."></textarea>
+        <div class="profile-row" data-target="api-auth">
+          <select class="profile-select"><option value="">— saved profiles —</option></select>
+          <button type="button" class="profile-apply link-btn">Apply</button>
+          <input type="text" class="profile-name" placeholder="name to save" />
+          <button type="button" class="profile-save link-btn">Save</button>
+          <button type="button" class="profile-del link-btn">Delete</button>
+        </div>
+      </details>
+      <div class="presets">
+        <p class="presets-label">Try a known practice API:</p>
+        <div class="preset-chips" data-target="api-input"></div>
+      </div>
+    </section>
+
+    <!-- Code panel -->
+    <section class="panel" id="panel-code">
+      <div id="dropzone" class="dropzone">
+        <input type="file" id="file-input" multiple hidden />
+        <p class="drop-main">Drag &amp; drop a <strong>.zip</strong> of your site, or individual files</p>
+        <p class="drop-sub">or <button type="button" id="browse-btn" class="link-btn">browse files</button></p>
+        <ul id="file-list" class="file-list"></ul>
+      </div>
+      <button id="code-btn" class="primary-btn" disabled>Analyze code</button>
+      <p class="hint">Detects: leaked API keys &amp; secrets · private keys · hardcoded passwords · eval/innerHTML/SQL-injection patterns · committed .env/.git files · known-vulnerable npm / PyPI / Composer / RubyGems dependencies (via OSV.dev).</p>
+    </section>
+
+    <!-- Learn / roadmap panel -->
+    <section class="panel" id="panel-learn">
+      <div class="learn">
+        <p class="learn-intro">Everything a security engineer touches when assessing a web application — the methodology to follow, the OWASP Top 10 to test against, a career roadmap, and hands-on places to practise legally. SentryScan automates the non-intrusive parts; use this as the map for the rest.</p>
+
+        <h3 class="learn-h">🧭 Penetration-testing methodology</h3>
+        <ol class="method-list" id="method-list"></ol>
+
+        <h3 class="learn-h">🔓 Business logic &amp; workflow abuse — manual playbook</h3>
+        <p class="auth-hint">These flaws can't be scanned automatically (they require understanding what the app is <em>supposed</em> to do). Work through these steps by hand:</p>
+        <ol class="method-list" id="bizlogic-list"></ol>
+
+        <h3 class="learn-h">🎯 OWASP Top 10 (2021) — what to test &amp; what SentryScan covers</h3>
+        <div class="owasp-table" id="owasp-table"></div>
+
+        <h3 class="learn-h">🚀 Security-engineer roadmap</h3>
+        <div class="roadmap" id="roadmap"></div>
+
+        <h3 class="learn-h">🧪 Practise legally (these load straight into the testers above)</h3>
+        <div class="resource-grid" id="practice-grid"></div>
+
+        <h3 class="learn-h">📚 Guided learning paths &amp; labs</h3>
+        <div class="resource-grid" id="learning-grid"></div>
+
+        <p class="learn-note">⚠ Only test systems you own or are explicitly authorized to assess. The practice sites above are provided by their owners specifically for legal testing.</p>
+      </div>
+    </section>
+
+    <!-- History panel -->
+    <section class="panel" id="panel-history">
+      <div class="history-head">
+        <p class="hint" style="margin:0">Your recent scans (stored locally in this browser). Click one to view its report again — no re-scan needed.</p>
+        <button type="button" id="clear-history" class="action-btn">Clear history</button>
+      </div>
+      <div id="history-list" class="history-list"></div>
+    </section>
+
+    <div id="loading" class="loading hidden">
+      <div class="spinner" aria-hidden="true"></div>
+      <p id="loading-text">Testing…</p>
+    </div>
+
+    <div id="error" class="error-box hidden"></div>
+
+    <section id="results" class="results hidden">
+      <div class="report-actions">
+        <button type="button" id="export-json" class="action-btn">⬇ Export JSON</button>
+        <button type="button" id="export-pdf" class="action-btn">🖨 Save as PDF</button>
+      </div>
+      <div class="scorecard">
+        <div class="gauge">
+          <svg viewBox="0 0 120 120" class="gauge-svg">
+            <circle class="gauge-bg" cx="60" cy="60" r="52"></circle>
+            <circle id="gauge-arc" class="gauge-arc" cx="60" cy="60" r="52"></circle>
+          </svg>
+          <div class="gauge-center">
+            <span id="score-grade" class="grade">–</span>
+            <span id="score-num" class="score-num">0/100</span>
+          </div>
+        </div>
+        <div class="score-meta">
+          <h3 id="result-title">Results</h3>
+          <p id="result-sub" class="result-sub"></p>
+          <div id="cat-summary" class="cat-summary"></div>
+        </div>
+      </div>
+
+      <div class="filter-bar">
+        <span>Filter:</span>
+        <div id="filters" class="filters"></div>
+      </div>
+
+      <div id="findings" class="findings"></div>
+    </section>
+
+    <section id="how" class="how">
+      <h3>How it works</h3>
+      <p>SentryScan is a non-intrusive tester. It loads pages the way a browser does and never attempts exploits. The render test uses a real headless Chromium to catch JavaScript errors. The code scanner analyzes files on the server and only contacts the public <a href="https://osv.dev" target="_blank" rel="noopener noreferrer">OSV.dev</a> database to check dependency versions. Scans of localhost / private networks are blocked, and no results are stored.</p>
+      <p class="how-note">Only test websites and code you own or are authorized to assess.</p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>SentryScan · UI · API · Security · Render testing for any website</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

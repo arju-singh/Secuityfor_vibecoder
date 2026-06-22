@@ -1,0 +1,22 @@
+{
+  "name": "sentryscan",
+  "version": "1.0.0",
+  "description": "Full-stack website security scanner: live-URL auditing and uploaded-code analysis (secret/key leak detection, dangerous patterns, dependency vulnerabilities).",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node test/integration.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "cheerio": "^1.0.0",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "playwright": "^1.49.1"
+  }
+}

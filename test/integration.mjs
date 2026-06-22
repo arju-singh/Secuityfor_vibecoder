@@ -1,0 +1,203 @@
+// Integration test: stand up a deliberately-vulnerable local server and prove
+// the fuzzer and authenticated scanning actually detect/exercise real bugs.
+// Run with: SENTRYSCAN_ALLOW_LOCAL=1 node test/integration.mjs  (or `npm test`)
+process.env.SENTRYSCAN_ALLOW_LOCAL = '1';
+
+import express from 'express';
+import { scanApiFuzz } from '../src/scanners/apiFuzzScanner.js';
+import { scanAccess } from '../src/scanners/accessScanner.js';
+import { scanApiSpec } from '../src/scanners/apiSpecScanner.js';
+import { runWithAuth, fetchWithTimeout } from '../src/scanners/util.js';
+
+let passed = 0, failed = 0;
+function assert(cond, msg) {
+  if (cond) { passed++; console.log('  ✓', msg); }
+  else { failed++; console.log('  ✗ FAIL:', msg); }
+}
+
+// --- Deliberately-vulnerable test app --------------------------------------
+const app = express();
+app.use(express.json());
+
+// Vulnerable POST: SQLi via the JSON body's username field.
+app.post('/login', (req, res) => {
+  const username = req.body && req.body.username;
+  if (typeof username === 'string' && username.includes("'")) {
+    return res.status(200).send(`You have an error in your SQL syntax near '${username}'`);
+  }
+  res.json({ ok: true });
+});
+
+// Vulnerable POST with a NESTED body field: user.name.
+app.post('/profile', (req, res) => {
+  const name = req.body && req.body.user && req.body.user.name;
+  if (typeof name === 'string' && name.includes("'")) {
+    return res.status(200).send(`You have an error in your SQL syntax near '${name}'`);
+  }
+  res.json({ ok: true });
+});
+
+// Boolean-injectable endpoint: a tautology returns a row, a contradiction empty.
+app.get('/items', (req, res) => {
+  const id = String(req.query.id || '');
+  if (/AND\s+1=2|AND\s+'1'='2/i.test(id)) return res.json({ items: [] });
+  if (/AND\s+1=1|AND\s+'1'='1/i.test(id)) return res.json({ items: [{ id: 1, name: 'widget', price: 9 }] });
+  if (/^\d+$/.test(id)) return res.json({ items: [{ id: Number(id), name: 'widget', price: 9 }] });
+  res.json({ items: [] });
+});
+// Non-injectable: ignores the parameter entirely (must NOT be "confirmed").
+app.get('/safe-items', (req, res) => res.json({ items: [{ id: 1, name: 'fixed-result' }] }));
+
+app.get('/search', (req, res) => {
+  let q = req.query.q;
+  if (Array.isArray(q)) return res.status(500).send('TypeError: q.match is not a function'); // type confusion
+  q = q == null ? '' : String(q);
+  if (q.length > 5000) return res.status(500).send('Request entity too large');               // oversized
+  if (q.includes("'")) return res.status(200).send(`You have an error in your SQL syntax; check near '${q}'`); // SQLi
+  if (q.includes('etc/passwd')) return res.send('root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:');             // traversal
+  if (/[;|]\s*id/.test(q)) return res.send('uid=33(www-data) gid=33(www-data) groups=33(www-data)');           // cmd injection
+  if (q.includes('7*7')) return res.send('Result: 49');                                                         // SSTI
+  res.set('content-type', 'text/html').send(`<html><body>You searched for: ${q}</body></html>`);                // reflected XSS (unencoded)
+});
+
+// IDOR: any integer order ID is directly addressable; >1000 is "not found".
+app.get('/api/orders/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1 || id > 1000) return res.status(404).json({ error: 'not found' });
+  res.json({ id, owner: `user_${id}`, total: id * 10, items: [`item-${id}-a`, `item-${id}-b`], note: `Order number ${id} details for the owner.` });
+});
+
+// Endpoint that ignores auth entirely (broken access control).
+app.get('/api/public', (req, res) => res.json({ data: 'this is always served', service: 'demo', fixed: true }));
+
+// 403 normally, but bypassable with a spoofed X-Forwarded-For header.
+app.get('/protected', (req, res) => {
+  if (req.get('x-forwarded-for') === '127.0.0.1') return res.json({ secret: 'you bypassed the gate' });
+  res.status(403).json({ error: 'forbidden' });
+});
+
+// A minimal OpenAPI spec describing two GET endpoints.
+app.get('/openapi.json', (req, res) => res.json({
+  openapi: '3.0.0', info: { title: 'demo', version: '1' },
+  paths: { '/api/public': { get: {} }, '/api/orders/{id}': { get: {} } }
+}));
+
+// Auth-protected endpoint: only returns the secret with the right bearer token.
+app.get('/secret', (req, res) => {
+  if (req.get('authorization') === 'Bearer good-token') return res.json({ secret: 'flag{authenticated}' });
+  res.status(401).json({ error: 'unauthorized' });
+});
+
+const server = app.listen(0);
+await new Promise((r) => server.once('listening', r));
+const base = `http://127.0.0.1:${server.address().port}`;
+
+try {
+  // --- 1) API parameter fuzzing finds the injected bugs --------------------
+  console.log('\n[1] API parameter fuzzing against vulnerable /search?q=:');
+  const fuzz = await scanApiFuzz(`${base}/search?q=hello`);
+  const titles = fuzz.findings.map((f) => f.title).join(' | ');
+  console.log('    findings:', fuzz.findings.map((f) => `${f.severity}:${f.title}`).join(', '));
+  assert(/SQL injection/i.test(titles), 'detects SQL injection');
+  assert(/Reflected XSS/i.test(titles), 'detects reflected XSS (unencoded HTML)');
+  assert(/Path traversal/i.test(titles), 'detects path traversal');
+  assert(/Command injection/i.test(titles), 'detects command injection');
+  assert(/template injection/i.test(titles), 'detects server-side template injection');
+  assert(/error|500|Type confusion/i.test(titles), 'detects unhandled error / type confusion');
+
+  // --- 2) Clean endpoint produces no false positives -----------------------
+  console.log('\n[2] Fuzzing a SAFE endpoint (no reflection, no errors):');
+  const safeApp = express();
+  safeApp.get('/ok', (req, res) => res.json({ ok: true })); // ignores input entirely
+  const safeServer = safeApp.listen(0);
+  await new Promise((r) => safeServer.once('listening', r));
+  const safeBase = `http://127.0.0.1:${safeServer.address().port}`;
+  const safe = await scanApiFuzz(`${safeBase}/ok?q=1`);
+  const realIssues = safe.findings.filter((f) => f.severity !== 'info');
+  console.log('    non-info findings:', realIssues.length);
+  assert(realIssues.length === 0, 'no false positives on a safe endpoint');
+  safeServer.close();
+
+  // --- 2b) JSON body fuzzing (opt-in write method) finds body-field bugs ---
+  console.log('\n[2b] Body fuzzing a vulnerable POST /login (allowWrite=true):');
+  const bodyFuzz = await scanApiFuzz(`${base}/login`, {
+    method: 'POST', body: JSON.stringify({ username: 'admin', password: 'x' }), allowWrite: true
+  });
+  const bTitles = bodyFuzz.findings.map((f) => f.title).join(' | ');
+  console.log('    findings:', bodyFuzz.findings.map((f) => `${f.severity}:${f.title}`).join(', '));
+  assert(/SQL injection \(body field "username"\)/i.test(bTitles), 'detects SQLi in a JSON body field');
+
+  // --- 2c) Write fuzzing is REFUSED without explicit opt-in ----------------
+  console.log('\n[2c] Write fuzzing without opt-in is refused (no requests sent):');
+  const refused = await scanApiFuzz(`${base}/login`, { method: 'POST', body: JSON.stringify({ username: 'a' }), allowWrite: false });
+  assert(refused.findings.some((f) => /POST fuzzing is disabled/i.test(f.title)), 'POST fuzzing refused unless allowWrite is set');
+
+  // --- 2d) Nested / array body field fuzzing -------------------------------
+  console.log('\n[2d] Nested body field fuzzing (user.name in a POST body):');
+  const nested = await scanApiFuzz(`${base}/profile`, {
+    method: 'POST', body: JSON.stringify({ user: { name: 'bob' }, tags: ['x', 'y'] }), allowWrite: true
+  });
+  assert(nested.findings.some((f) => /SQL injection \(body field "user\.name"\)/i.test(f.title)), 'detects SQLi in a NESTED body field (user.name)');
+  assert((nested.meta.bodyFieldsFuzzed || []).includes('tags.0'), 'discovers array element paths (tags.0)');
+
+  // --- 2e) Custom payloads -------------------------------------------------
+  console.log('\n[2e] Custom payload list:');
+  const custom = await scanApiFuzz(`${base}/search?q=hi`, { customPayloads: ["CUSTOMPAY'LOAD"] });
+  assert(custom.meta.customPayloadCount === 1, 'custom payload registered');
+  assert(custom.findings.some((f) => /custom payload/i.test(f.title)), 'custom payload triggers a finding');
+
+  // --- 2e2) Non-destructive SQLi CONFIRMATION (boolean-based) --------------
+  console.log('\n[2e2] Boolean-based SQLi confirmation (non-destructive PoC):');
+  const confirmed = await scanApiFuzz(`${base}/items?id=1`);
+  assert(confirmed.findings.some((f) => /Confirmed SQL injection — boolean-based/.test(f.title)), 'confirms boolean-based SQLi without extracting data');
+  const noFp = await scanApiFuzz(`${base}/safe-items?id=1`);
+  assert(!noFp.findings.some((f) => /Confirmed SQL injection/.test(f.title)), 'no false confirmation on a non-injectable endpoint');
+
+  // --- 2f) Access control: IDOR heuristic ----------------------------------
+  console.log('\n[2f] IDOR detection on /api/orders/5:');
+  const idor = await scanAccess(`${base}/api/orders/5`);
+  assert(idor.findings.some((f) => /IDOR/i.test(f.title)), 'detects sequential-ID IDOR');
+
+  // --- 2g) Access control: broken auth enforcement -------------------------
+  console.log('\n[2g] Broken access control (endpoint ignores auth):');
+  const broken = await runWithAuth({ Authorization: 'Bearer any' }, () => scanAccess(`${base}/api/public`));
+  assert(broken.findings.some((f) => /without authentication/i.test(f.title)), 'flags endpoint that serves identical data with/without auth');
+
+  // --- 2h) Access control: properly enforced endpoint = no false positive --
+  console.log('\n[2h] Properly enforced endpoint is NOT flagged:');
+  const enforced = await runWithAuth({ Authorization: 'Bearer good-token' }, () => scanAccess(`${base}/secret`));
+  assert(enforced.meta.authEnforced === true, 'recognises enforced auth (401 anonymous)');
+  assert(!enforced.findings.some((f) => /without authentication/i.test(f.title)), 'no false positive on enforced endpoint');
+
+  // --- 2i) Auth bypass on a 403 endpoint -----------------------------------
+  console.log('\n[2i] 401/403 bypass detection:');
+  const bypass = await scanAccess(`${base}/protected`);
+  assert(bypass.findings.some((f) => /bypass/i.test(f.title)), 'detects header-based authorization bypass');
+
+  // --- 2j) Rate-limit detection --------------------------------------------
+  console.log('\n[2j] Missing rate limiting:');
+  const rl = await scanAccess(`${base}/api/public`, { rateLimit: true });
+  assert(rl.findings.some((f) => /No rate limiting/i.test(f.title)), 'flags absence of rate limiting');
+
+  // --- 2k) OpenAPI-driven endpoint enumeration -----------------------------
+  console.log('\n[2k] OpenAPI endpoint enumeration:');
+  const spec = await scanApiSpec(`${base}`);
+  assert(spec.findings.some((f) => /OpenAPI spec discovered/i.test(f.title)), 'discovers & parses the OpenAPI spec');
+  assert(spec.meta.getEndpoints === 2, 'enumerates the documented GET endpoints');
+  assert(spec.findings.some((f) => /without authentication/i.test(f.title)), 'flags documented endpoints reachable without auth');
+
+  // --- 3) Authenticated scanning actually sends credentials ----------------
+  console.log('\n[3] Authenticated scanning sends auth headers end-to-end:');
+  const anon = await fetchWithTimeout(`${base}/secret`, { timeout: 5000 });
+  assert(anon.status === 401, 'anonymous request to /secret is 401');
+  await runWithAuth({ Authorization: 'Bearer good-token' }, async () => {
+    const r = await fetchWithTimeout(`${base}/secret`, { timeout: 5000 });
+    const body = await r.json();
+    assert(r.status === 200 && body.secret === 'flag{authenticated}', 'authenticated request to /secret returns the secret');
+  });
+} finally {
+  server.close();
+}
+
+console.log(`\n${failed === 0 ? '✅ ALL PASSED' : '❌ FAILURES'}: ${passed} passed, ${failed} failed`);
+process.exit(failed === 0 ? 0 : 1);
