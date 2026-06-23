@@ -5,8 +5,8 @@ const SEV_COLORS = {
   critical: 'var(--critical)', high: 'var(--high)', medium: 'var(--medium)',
   low: 'var(--low)', info: 'var(--info)'
 };
-const CAT_LABELS = { ui: 'UI', security: 'Security', vuln: 'Vulnerabilities', render: 'Render', api: 'API', code: 'Code', fuzz: 'Fuzzing', access: 'Access control', spec: 'API surface', perf: 'Performance', a11y: 'Accessibility', seo: 'SEO', quality: 'Code quality', frontend: 'Frontend', config: 'Config & DevOps', testing: 'Testing', hygiene: 'Project hygiene' };
-const CAT_ICONS = { ui: '🧩', security: '🛡️', vuln: '🎯', render: '🖥️', api: '🔌', code: '📦', fuzz: '🧬', access: '🔓', spec: '📜', perf: '⚡', a11y: '♿', seo: '🔎', quality: '🧹', frontend: '🎨', config: '⚙️', testing: '🧪', hygiene: '📋' };
+const CAT_LABELS = { ui: 'UI', security: 'Security', vuln: 'Vulnerabilities', render: 'Render', api: 'API', code: 'Code', fuzz: 'Fuzzing', access: 'Access control', spec: 'API surface', perf: 'Performance', a11y: 'Accessibility', seo: 'SEO', quality: 'Code quality', frontend: 'Frontend', config: 'Config & DevOps', testing: 'Testing', hygiene: 'Project hygiene', seccode: 'Code security', deps: 'Dependencies' };
+const CAT_ICONS = { ui: '🧩', security: '🛡️', vuln: '🎯', render: '🖥️', api: '🔌', code: '📦', fuzz: '🧬', access: '🔓', spec: '📜', perf: '⚡', a11y: '♿', seo: '🔎', quality: '🧹', frontend: '🎨', config: '⚙️', testing: '🧪', hygiene: '📋', seccode: '🔐', deps: '📦' };
 
 // Parse a "Name: value" textarea into a headers object for authenticated scans.
 function parseAuthHeaders(id) {

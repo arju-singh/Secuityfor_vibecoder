@@ -1,6 +1,6 @@
 # SentryScan — Testing Tools Inventory
 
-A reference of everything SentryScan can test. **3 input modes → 17 test suites → 11 scanner engines → 130+ individual checks**, verified by a 39-assertion integration test (`npm test`).
+A reference of everything SentryScan can test. **3 input modes → 19 test suites → 11 scanner engines → 150+ individual checks**, verified by a 43-assertion integration test (`npm test`). Covers ~13 of the 15 common "vibe-coded app" diagnostic areas natively; the two external-engine areas (SonarQube deep analysis, full ESLint rule set) run in CI.
 
 ---
 
@@ -34,16 +34,18 @@ A reference of everything SentryScan can test. **3 input modes → 17 test suite
 | 10 | 📜 API surface (OpenAPI enumeration) | `apiSpecScanner.js` |
 | 11 | 🧬 Parameter fuzzing | `apiFuzzScanner.js` |
 
-### Code upload (6 suites)
+### Code upload (8 suites)
 
 | # | Suite | Engine |
 |---|-------|--------|
 | 12 | 📦 Source code (secrets, dangerous patterns, sensitive files, dep CVEs) | `codeScanner.js` |
-| 13 | 🧹 Code quality (+ perf anti-patterns + AI-hallucinated imports) | `codeAuditScanner.js` |
-| 14 | 🎨 Frontend quality | `codeAuditScanner.js` |
-| 15 | ⚙️ Config & DevOps | `codeAuditScanner.js` |
-| 16 | 🧪 Testing quality | `codeAuditScanner.js` |
-| 17 | 📋 Project hygiene | `codeAuditScanner.js` |
+| 13 | 🔐 Code security (client-secret exposure, weak randomness, CORS/cookie/upload, CSRF-GET, debug mode, raw-HTML bindings) | `codeAuditScanner.js` |
+| 14 | 📦 Dependencies (excessive count, duplicate libs, loose pinning, multiple lock files) | `codeAuditScanner.js` |
+| 15 | 🧹 Code quality (+ perf anti-patterns + AI-hallucinated imports) | `codeAuditScanner.js` |
+| 16 | 🎨 Frontend quality | `codeAuditScanner.js` |
+| 17 | ⚙️ Config & DevOps | `codeAuditScanner.js` |
+| 18 | 🧪 Testing quality | `codeAuditScanner.js` |
+| 19 | 📋 Project hygiene | `codeAuditScanner.js` |
 
 ---
 
@@ -84,13 +86,15 @@ OpenAPI/Swagger spec discovery (common paths or a given spec URL) · documented-
 ### 10. `codeScanner.js` — Source code
 Secrets/keys (AWS, Google, Stripe, GitHub, GitLab, Slack, SendGrid, Twilio, npm, OpenAI, Anthropic, Mailgun, private keys, JWTs, Google service accounts, hardcoded passwords, DB connection strings) · dangerous patterns (`eval`, `Function`, `innerHTML`, `dangerouslySetInnerHTML`, `document.write`, shell exec, SQL concatenation) · committed sensitive files (`.env`, `.git`, SSH keys, `.htpasswd`, backups) · known-vulnerable dependencies via **OSV.dev** (npm, PyPI, Composer, RubyGems).
 
-### 11. `codeAuditScanner.js` — Code quality / frontend / config / testing / hygiene (native static analysis)
-**Code quality:** oversized files (>300 lines) · god modules (20+ exports) · TODO/FIXME/"not implemented" stubs · empty function bodies · commented-out code blocks · **AI-hallucinated/undeclared imports** (imported but not in package.json).
-**Performance anti-patterns:** `await` inside `.map()` · synchronous I/O (`…Sync`) · JSON parse/stringify inside loops.
-**Frontend quality:** `<img>` without alt · `target="_blank"` without `rel="noopener"` · full lodash/moment imports · direct DOM access in React · `useEffect` timers/listeners without cleanup · list render without `key`.
-**Config & DevOps:** hardcoded localhost URLs · unpinned Docker `:latest` · missing health endpoint · excessive `console.log` · TypeScript strict mode disabled.
-**Testing:** no tests · low test-to-source ratio · empty test bodies · tests without assertions.
-**Project hygiene:** committed `.env` · weak/missing `.gitignore` · missing README · missing `.env.example` · missing lock file.
+### 11. `codeAuditScanner.js` — code security / dependencies / quality / frontend / config / testing / hygiene (native static analysis)
+**Code security:** client-exposed secrets (`NEXT_PUBLIC_`/`VITE_`/`REACT_APP_` + secret) · `Math.random()` in security context · wildcard CORS in code · cookies without httpOnly/secure · file uploads without limits · state-changing GET (CSRF) · raw-HTML bindings (`v-html`/`{@html}`) · debug mode enabled.
+**Dependencies:** excessive count (40+/60+) · duplicate libraries (HTTP clients, date libs, validators) · loose version pinning (`*`/`latest`/`>=`) · multiple package-manager lock files.
+**Code quality:** oversized files (>300 lines) · god modules (20+ exports) · TODO/"not implemented" stubs · empty function bodies · commented-out code · mixed async styles · `.then()` without `.catch()` · 6+ parameters · **AI-hallucinated/undeclared imports**.
+**Performance anti-patterns:** `await` inside `.map()` · synchronous I/O · JSON in loops · DB query in loop (N+1) · sequential awaits that could parallelize.
+**Frontend quality:** missing `alt` · missing `rel="noopener"` · heavy lodash/moment imports · direct DOM in React · `useEffect` leaks · list render without `key` · no React Error Boundary · icon-only buttons without aria-label.
+**Config & DevOps:** hardcoded localhost · unpinned Docker `:latest` · missing health endpoint · excessive `console.log` · TS strict off.
+**Testing:** no tests · low ratio · empty tests · no assertions · mock-everything · happy-path-only.
+**Project hygiene:** committed `.env` · weak/missing `.gitignore` · missing README · missing `.env.example` · missing lock file · flat directory structure.
 
 > Native & dependency-free (regex/heuristic) — these approximate what ESLint / SonarQube cover. For full depth, integrate those tools in CI. Dependency CVEs already use OSV.dev (Trivy-equivalent).
 

@@ -158,6 +158,11 @@ async function seoFindings($, u) {
         'Missing og: tags produce poor link previews when shared on social/chat.',
         'Add Open Graph tags (og:title, og:description, og:image).'));
     }
+    if (!$('link[rel~="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]').length) {
+      f.push(finding('info', 'No favicon',
+        'No <link rel="icon"> — the browser tab shows a generic icon, hurting brand recognition.',
+        'Add a favicon link (and apple-touch-icon).'));
+    }
   }
   await Promise.allSettled([
     (async () => {

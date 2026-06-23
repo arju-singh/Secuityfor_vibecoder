@@ -222,6 +222,8 @@ app.post('/api/scan/files', upload.any(), async (req, res) => {
     try {
       const audit = scanCodeAudit(entries);
       sections.push(
+        { category: 'seccode', label: 'Code security', meta: {}, findings: audit.seccode },
+        { category: 'deps', label: 'Dependencies', meta: {}, findings: audit.deps },
         { category: 'quality', label: 'Code quality', meta: {}, findings: audit.quality },
         { category: 'frontend', label: 'Frontend quality', meta: {}, findings: audit.frontend },
         { category: 'config', label: 'Config & DevOps', meta: {}, findings: audit.config },

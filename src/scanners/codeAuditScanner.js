@@ -38,12 +38,79 @@ export function scanCodeAudit(entries) {
   }
 
   return {
+    seccode: seccodeChecks(files),
+    deps: depsChecks(pkg, paths, files),
     quality: qualityChecks(files, pkg),
     frontend: frontendChecks(files),
     config: configChecks(files, tsconfig, dockerfile),
     testing: testingChecks(files),
     hygiene: hygieneChecks(paths, gitignore, pkg)
   };
+}
+
+// ---- Code security (SEC-* in-code patterns) --------------------------------
+function seccodeChecks(files) {
+  const f = [];
+  const code = files.filter((x) => CODE_EXT.has(x.ext));
+  let clientSecret = 0, weakRandom = 0, corsWild = 0, badCookie = 0, fileUpload = 0, csrfGet = 0, vHtml = 0;
+  let debugMode = 0;
+  for (const x of code) {
+    clientSecret += count(/\b(NEXT_PUBLIC_|VITE_|REACT_APP_)\w*(SECRET|KEY|TOKEN|PASSWORD|PRIVATE|APIKEY)/gi, x.content);
+    // Math.random() near a security-sensitive word
+    if (/Math\.random\(\)/.test(x.content)) {
+      for (const m of x.content.matchAll(/Math\.random\(\)/g)) {
+        if (/token|secret|password|otp|nonce|salt|sessionid|session_id|api[_-]?key|uuid|csrf/i.test(x.content.slice(Math.max(0, m.index - 80), m.index + 80))) weakRandom++;
+      }
+    }
+    corsWild += count(/Access-Control-Allow-Origin['"]?\s*[:,]\s*['"]\*|cors\(\s*\{[^}]*origin\s*:\s*['"]\*/gi, x.content);
+    for (const m of x.content.matchAll(/\.cookie\(/g)) {
+      const slice = x.content.slice(m.index, m.index + 200);
+      if (!/httpOnly/i.test(slice) || !/secure/i.test(slice)) badCookie++;
+    }
+    fileUpload += count(/multer\(\s*\{(?![^}]*(limits|fileFilter))/g, x.content);
+    csrfGet += count(/\.get\(\s*['"][^'"]+['"][^]{0,200}?\b(\.create\(|\.update\(|\.destroy\(|\.delete\(|\.save\(|INSERT |UPDATE |DELETE )/gi, x.content);
+    vHtml += count(/v-html\s*=|\{@html\s/g, x.content);
+  }
+  for (const x of files) debugMode += count(/\bDEBUG\s*=\s*['"]?\*|['"]?debug['"]?\s*:\s*true/gi, x.content);
+
+  if (clientSecret) f.push(finding('critical', `${clientSecret} client-exposed secret env var(s)`, 'Env vars with NEXT_PUBLIC_/VITE_/REACT_APP_ prefixes are bundled into client JS — a secret here is public.', 'Never prefix secrets with a public/client prefix; keep them server-side.'));
+  if (weakRandom) f.push(finding('high', `${weakRandom} use(s) of Math.random() in a security context`, 'Math.random() is not cryptographically secure; using it for tokens/OTPs/IDs is predictable.', 'Use crypto.randomBytes / crypto.randomUUID / webcrypto.'));
+  if (corsWild) f.push(finding('high', `${corsWild} wildcard CORS configuration(s) in code`, 'Allowing Access-Control-Allow-Origin: * exposes the API to any site.', 'Restrict CORS to an explicit allowlist of trusted origins.'));
+  if (badCookie) f.push(finding('high', `${badCookie} cookie(s) set without httpOnly/secure`, 'Cookies missing httpOnly/secure are exposed to XSS and sent over plain HTTP.', 'Set httpOnly, secure, and sameSite on session/auth cookies.'));
+  if (fileUpload) f.push(finding('high', `${fileUpload} file upload(s) without size/type limits`, 'multer without limits/fileFilter allows oversized or dangerous uploads.', 'Configure limits and a fileFilter (allowlist MIME types).'));
+  if (csrfGet) f.push(finding('high', `${csrfGet} state-changing GET route(s)`, 'Mutations behind GET requests are CSRF-able and can be triggered by a link/image.', 'Use POST/PUT/DELETE for mutations and validate anti-CSRF tokens.'));
+  if (vHtml) f.push(finding('critical', `${vHtml} raw-HTML binding(s) (v-html / {@html})`, 'Binding unsanitized HTML (v-html, Svelte {@html}) is an XSS vector.', 'Avoid raw HTML bindings; sanitize with DOMPurify if unavoidable.'));
+  if (debugMode) f.push(finding('high', `${debugMode} debug-mode flag(s) enabled`, 'DEBUG=* / debug:true in committed config leaks internals in production.', 'Disable debug mode in production builds.'));
+  if (!f.length) f.push(finding('info', 'No in-code security anti-patterns detected', 'Pattern-based code-security checks passed.', 'Still run SAST (Semgrep/CodeQL) for depth.'));
+  return f;
+}
+
+// ---- Dependency hygiene (DEP-*) --------------------------------------------
+function depsChecks(pkg, paths, files) {
+  const f = [];
+  const lower = paths.map((p) => p.toLowerCase());
+  if (pkg) {
+    const deps = Object.keys(pkg.dependencies || {});
+    if (deps.length >= 60) f.push(finding('high', `Excessive dependencies (${deps.length})`, '60+ production dependencies enlarge the attack/supply-chain surface and bundle.', 'Audit and remove unneeded dependencies.'));
+    else if (deps.length >= 40) f.push(finding('medium', `High dependency count (${deps.length})`, '40+ production dependencies are worth reviewing for bloat.', 'Trim dependencies you do not need.'));
+
+    const groups = {
+      'HTTP clients': ['axios', 'got', 'node-fetch', 'superagent', 'request', 'undici'],
+      'date libraries': ['moment', 'dayjs', 'date-fns', 'luxon'],
+      'validators': ['joi', 'zod', 'yup', 'ajv', 'class-validator']
+    };
+    for (const [label, libs] of Object.entries(groups)) {
+      const hit = libs.filter((l) => deps.includes(l));
+      if (hit.length >= 2) f.push(finding('medium', `Duplicate ${label} (${hit.join(', ')})`, `Multiple ${label} do the same job, adding bloat and inconsistency.`, `Standardize on one of: ${hit.join(', ')}.`));
+    }
+    const loose = Object.entries({ ...pkg.dependencies, ...pkg.devDependencies }).filter(([, v]) => typeof v === 'string' && /^(\*|latest|>=|>)/.test(v.trim())).map(([k]) => k);
+    if (loose.length) f.push(finding('high', `${loose.length} loosely-pinned dependency version(s)`, 'Using *, latest, or >= means installs are non-reproducible and can pull breaking/malicious updates.', 'Pin with caret/exact ranges and commit a lock file.', loose.slice(0, 8).join(', ')));
+  }
+  const lockfiles = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'].filter((l) => lower.some((p) => p.endsWith(l)));
+  if (lockfiles.length >= 2) f.push(finding('medium', `Multiple package-manager lock files (${lockfiles.join(', ')})`, 'Conflicting lock files from npm + yarn + pnpm cause inconsistent installs.', 'Pick one package manager and keep a single lock file.'));
+  if (!pkg) return [finding('info', 'No package.json found', 'No manifest to audit dependencies.', 'N/A')];
+  if (!f.length) f.push(finding('info', 'No dependency-hygiene issues detected', 'Dependency manifest looks healthy.', 'Run npm audit / Trivy in CI for CVEs.'));
+  return f;
 }
 
 // ---- Code quality + performance anti-patterns + hallucinated imports -------
@@ -56,6 +123,7 @@ function qualityChecks(files, pkg) {
     'Large files usually do too much and are hard to maintain.', 'Split into focused modules.', godFiles.slice(0, 6).join('\n')));
 
   let godModules = 0, todos = 0, empties = 0, commented = 0, awaitMap = 0, syncIO = 0, jsonLoop = 0;
+  let mixedAsync = 0, noCatch = 0, manyParams = 0, dbLoop = 0, seqAwait = 0;
   for (const x of code) {
     if (count(/^\s*export\b/gm, x.content) >= 20) godModules++;
     todos += count(/\b(TODO|FIXME)\b|not\s+implemented|throw new Error\(\s*['"][^'"]*not implemented/gi, x.content);
@@ -64,6 +132,13 @@ function qualityChecks(files, pkg) {
     awaitMap += count(/\.map\(\s*async\b/g, x.content);
     syncIO += count(/\b(readFileSync|writeFileSync|appendFileSync|execSync)\b/g, x.content);
     jsonLoop += loopWith(x.content, /JSON\.(parse|stringify)\(/);
+    if (/\.then\(/.test(x.content) && /\bawait\b/.test(x.content)) mixedAsync++;
+    noCatch += count(/\.then\([^;]*\)\s*(?![.\s]*catch)[;\n]/g, x.content);
+    for (const m of x.content.matchAll(/\bfunction\s+\w*\s*\(([^)]{0,400}?)\)/g)) {
+      if ((m[1].match(/,/g) || []).length >= 5) manyParams++; // 6+ params
+    }
+    dbLoop += loopWith(x.content, /await[^;]*\b(query|findOne|findMany|\.find\(|select\(|aggregate\(|exec\()/i);
+    seqAwait += sequentialAwaits(x.content);
   }
   if (godModules) f.push(finding('medium', `${godModules} "god module(s)" with 20+ exports`, 'Modules exporting 20+ symbols are a monolith smell.', 'Group related exports into cohesive modules.'));
   if (todos) f.push(finding('low', `${todos} TODO/FIXME/"not implemented" marker(s)`, 'Unfinished work or placeholder stubs remain in the code.', 'Resolve or track these before shipping.'));
@@ -72,6 +147,11 @@ function qualityChecks(files, pkg) {
   if (awaitMap) f.push(finding('medium', `${awaitMap} use(s) of await inside .map()`, 'await in .map() builds an array of promises that often run unintentionally or are not awaited.', 'Use Promise.all(arr.map(async …)) or a for…of loop.'));
   if (syncIO) f.push(finding('low', `${syncIO} synchronous I/O call(s) (…Sync)`, 'Synchronous file/exec calls block the event loop if used in request handling.', 'Use async variants outside startup code.'));
   if (jsonLoop) f.push(finding('low', `${jsonLoop} JSON parse/stringify inside a loop`, 'Repeated serialization inside loops is wasteful.', 'Move serialization out of the loop where possible.'));
+  if (mixedAsync) f.push(finding('low', `${mixedAsync} file(s) mixing .then() with async/await`, 'Mixing promise styles in one file hurts readability and error handling.', 'Pick one style (prefer async/await).'));
+  if (noCatch) f.push(finding('medium', `${noCatch} .then() without a .catch()`, 'Unhandled promise rejections crash Node or silently fail.', 'Add .catch() or wrap awaits in try/catch.'));
+  if (manyParams) f.push(finding('medium', `${manyParams} function(s) with 6+ parameters`, 'Long parameter lists are error-prone and hard to call correctly.', 'Pass an options object instead.'));
+  if (dbLoop) f.push(finding('high', `${dbLoop} database query inside a loop (N+1)`, 'Querying the DB inside a loop is the classic N+1 problem and scales poorly.', 'Batch with a single query / IN clause / join.'));
+  if (seqAwait) f.push(finding('medium', `${seqAwait} block(s) of sequential awaits that could run in parallel`, 'Independent awaits run one-after-another instead of concurrently.', 'Use Promise.all for independent operations.'));
 
   // AI-hallucinated / undeclared imports (needs package.json to compare).
   if (pkg) {
@@ -97,7 +177,8 @@ function qualityChecks(files, pkg) {
 function frontendChecks(files) {
   const f = [];
   const fe = files.filter((x) => FE_EXT.has(x.ext));
-  let noAlt = 0, blankRel = 0, heavy = 0, domInReact = 0, effectLeak = 0, mapNoKey = 0;
+  let noAlt = 0, blankRel = 0, heavy = 0, domInReact = 0, effectLeak = 0, mapNoKey = 0, iconBtn = 0;
+  const react = fe.filter((x) => /\.(jsx|tsx)$/.test(x.path));
   for (const x of fe) {
     noAlt += count(/<img\b(?![^>]*\balt=)[^>]*>/gi, x.content);
     blankRel += count(/<a\b(?![^>]*\brel=)[^>]*target=["']_blank["'][^>]*>/gi, x.content);
@@ -105,7 +186,13 @@ function frontendChecks(files) {
     if (/\.(jsx|tsx)$/.test(x.path)) domInReact += count(/document\.(getElementById|querySelector)\(/g, x.content);
     if (/useEffect\(/.test(x.content) && /(setInterval|addEventListener)\(/.test(x.content) && !/clearInterval|removeEventListener|return\s*\(\s*\)\s*=>/.test(x.content)) effectLeak++;
     mapNoKey += count(/\.map\([^)]*=>\s*<[A-Z][A-Za-z]*\b(?![^>]*\bkey=)/g, x.content);
+    iconBtn += count(/<button\b(?![^>]*aria-label)[^>]*>\s*<(svg|i\b|Icon)/gi, x.content);
   }
+  // React Error Boundary — flag once if React app has none.
+  if (react.length && !react.some((x) => /componentDidCatch|getDerivedStateFromError|ErrorBoundary/.test(x.content))) {
+    f.push(finding('medium', 'No React Error Boundary', 'Without an error boundary, one component error unmounts the whole React tree (blank screen).', 'Add an ErrorBoundary around major sections of the app.'));
+  }
+  if (iconBtn) f.push(finding('medium', `${iconBtn} icon-only button(s) without an accessible label`, 'Icon buttons with no text/aria-label are announced as blank to screen readers.', 'Add aria-label to icon-only buttons.'));
   if (noAlt) f.push(finding('medium', `${noAlt} <img> without alt text`, 'Images without alt are inaccessible to screen readers.', 'Add descriptive alt (or alt="" for decorative images).'));
   if (blankRel) f.push(finding('medium', `${blankRel} target="_blank" link(s) without rel="noopener"`, 'Opening links without rel="noopener" exposes window.opener to the new page (reverse tabnabbing).', 'Add rel="noopener noreferrer" to target="_blank" links.'));
   if (heavy) f.push(finding('medium', `${heavy} full import(s) of a heavy library (lodash/moment)`, 'Importing all of lodash/moment bloats the client bundle.', 'Import specific functions, or use lighter alternatives (date-fns).'));
@@ -155,13 +242,17 @@ function testingChecks(files) {
   }
   const ratio = tests.length / source.length;
   if (ratio < 0.2) f.push(finding('medium', `Low test-to-source ratio (${tests.length}:${source.length})`, 'Few test files relative to source — likely thin coverage.', 'Increase test coverage of critical paths.'));
-  let emptyTests = 0, noAssert = 0;
+  let emptyTests = 0, noAssert = 0, mockAll = 0, happyOnly = 0;
   for (const x of tests) {
     emptyTests += count(/\b(it|test)\(\s*['"][^'"]*['"]\s*,\s*(async\s*)?\(\s*\)\s*=>\s*\{\s*\}\s*\)/g, x.content);
     if (!/\b(expect|assert|should|chai|t\.is|t\.deepEqual)\b/.test(x.content)) noAssert++;
+    if (count(/\b(jest|vi)\.mock\(/g, x.content) >= 3) mockAll++;
+    if (/\b(expect|assert)\b/.test(x.content) && !/throw|reject|toThrow|error|invalid|fail|catch|edge/i.test(x.content)) happyOnly++;
   }
   if (emptyTests) f.push(finding('high', `${emptyTests} empty test body(ies)`, 'Tests with empty bodies pass without checking anything — false confidence.', 'Implement real assertions or remove the test.'));
   if (noAssert) f.push(finding('medium', `${noAssert} test file(s) with no assertions`, 'Tests that never assert run code but verify nothing.', 'Add expect/assert calls.'));
+  if (mockAll) f.push(finding('medium', `${mockAll} test file(s) mocking almost everything`, 'Mocking all dependencies tests the mocks, not real behavior.', 'Keep integration boundaries real; mock only what you must.'));
+  if (happyOnly) f.push(finding('low', `${happyOnly} test file(s) covering only the happy path`, 'No error/edge-case assertions — failures and invalid inputs go untested.', 'Add tests for errors, rejections, and edge cases.'));
   if (!f.length) f.push(finding('info', 'No major testing issues detected', `${tests.length} test file(s) found with assertions.`, 'Track coverage in CI.'));
   return f;
 }
@@ -183,6 +274,10 @@ function hygieneChecks(paths, gitignore, pkg) {
   }
   const hasLock = lower.some((p) => /(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(p));
   if (pkg && !hasLock) f.push(finding('high', 'No lock file', 'Missing package-lock/yarn.lock/pnpm-lock makes installs non-reproducible.', 'Commit a lock file.'));
+  const codePaths = lower.filter((p) => /\.(js|jsx|ts|tsx|mjs|cjs|vue|svelte)$/.test(p));
+  if (codePaths.length >= 10 && codePaths.every((p) => !p.includes('/'))) {
+    f.push(finding('low', 'Flat directory structure', `${codePaths.length} source files sit at the repo root with no subdirectories — hard to navigate as the project grows.`, 'Organize code into folders (src/, routes/, components/, lib/…).'));
+  }
   if (!f.length) f.push(finding('info', 'No major project-hygiene issues detected', 'Core hygiene checks passed.', 'Keep README and .gitignore current.'));
   return f;
 }
@@ -207,6 +302,18 @@ function commentedBlocks(content) {
   for (const ln of lines) {
     if (/^\s*\/\/.*[;{}()=<>]/.test(ln)) { run++; if (run === 3) blocks++; }
     else run = 0;
+  }
+  return blocks;
+}
+// Count blocks of 3+ consecutive lines that each independently `await`
+// (a hint they could be parallelized with Promise.all).
+function sequentialAwaits(content) {
+  const lines = content.split('\n');
+  let run = 0, blocks = 0;
+  for (const ln of lines) {
+    if (/\bawait\b/.test(ln) && !/Promise\.all|Promise\.allSettled/.test(ln)) {
+      run++; if (run === 3) blocks++;
+    } else if (ln.trim() !== '') run = 0;
   }
   return blocks;
 }
