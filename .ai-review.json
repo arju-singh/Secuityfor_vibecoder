@@ -1,0 +1,14 @@
+{
+  "guidelines": [
+    "Scanners must stay non-destructive: no data exfiltration, RCE execution, data modification, or DoS — confirmation/PoC only.",
+    "Any new check should add a matching assertion to test/integration.mjs.",
+    "Match the existing code style: concise, commented intent, no new heavy dependencies without reason.",
+    "Never log or expose user-supplied credentials; redact them in reproduction output.",
+    "Keep findings actionable: severity, evidence, and a concrete remediation."
+  ],
+  "pathInstructions": [
+    { "path": "src/scanners/**", "instructions": "Verify probes are bounded (timeouts, caps) and safe by default; flag any request that could mutate remote state." },
+    { "path": ".github/workflows/**", "instructions": "Pin actions to valid version tags; ensure secret-gated jobs skip cleanly when the secret is absent." },
+    { "path": "public/**", "instructions": "Frontend is presentation-only; check for XSS via innerHTML and ensure findings are rendered with textContent." }
+  ]
+}

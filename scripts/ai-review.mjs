@@ -5,6 +5,7 @@
 // Env (set by the workflow): ANTHROPIC_API_KEY, GITHUB_TOKEN, GITHUB_REPOSITORY,
 // PR_NUMBER, BASE_SHA, HEAD_SHA, optional AI_REVIEW_MODEL.
 import { execSync } from 'node:child_process';
+import { readFileSync, existsSync } from 'node:fs';
 
 const KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = process.env.AI_REVIEW_MODEL || 'claude-sonnet-4-6';
@@ -26,14 +27,27 @@ try {
 if (!diff.trim()) { console.log('Empty diff — nothing to review.'); process.exit(0); }
 if (diff.length > 60000) diff = diff.slice(0, 60000) + '\n…[diff truncated for length]…';
 
+// Optional project config: custom guidelines + path-specific instructions.
+let cfg = {};
+if (existsSync('.ai-review.json')) {
+  try { cfg = JSON.parse(readFileSync('.ai-review.json', 'utf8')); }
+  catch (e) { console.log('Ignoring invalid .ai-review.json:', e.message); }
+}
+const guidelines = Array.isArray(cfg.guidelines) && cfg.guidelines.length
+  ? '\nProject coding guidelines to enforce:\n' + cfg.guidelines.map((g) => `- ${g}`).join('\n') : '';
+const pathRules = Array.isArray(cfg.pathInstructions) && cfg.pathInstructions.length
+  ? '\nPath-specific instructions:\n' + cfg.pathInstructions.map((p) => `- ${p.path}: ${p.instructions}`).join('\n') : '';
+
 const prompt = `You are a senior software engineer reviewing a pull request. Be concise and actionable.
 
-Return Markdown with:
-1. **Summary** — 2-3 sentences on what the PR changes.
-2. **Findings** — a bulleted list. For each: \`file:line\` if identifiable, a severity tag (**blocker** / **major** / **minor** / **nit**), the issue, and a concrete fix. Prioritise real bugs, security, and correctness over style. Where helpful, include a short committable code suggestion in a \`\`\`suggestion block.
-3. If there is nothing significant, say "✅ No blocking issues found."
+Return Markdown with these sections:
+1. **Summary** — 2-3 sentences on what the PR changes and why.
+2. **Walkthrough** — a compact table of each changed file and what changed in it.
+3. **Diagram** — ONLY if the change alters control/data flow across files, include a Mermaid diagram in a \`\`\`mermaid block; otherwise omit this section.
+4. **Findings** — a bulleted list. For each: \`file:line\` if identifiable, a severity tag (**blocker** / **major** / **minor** / **nit**), the issue, and a concrete fix. Prioritise real bugs, security, and correctness over style. Where a fix is small, include a committable \`\`\`suggestion block.
+5. If nothing significant, say "✅ No blocking issues found."
 
-Review only what the diff shows. Do not invent files.
+Review only what the diff shows. Do not invent files.${guidelines}${pathRules}
 
 DIFF:
 \`\`\`diff

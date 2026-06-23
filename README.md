@@ -71,7 +71,10 @@ The server listens on `PORT` (default `3000`).
 
 ### AI Code Review (`.github/workflows/ai-review.yml`)
 
-On every pull request, an AI reviewer posts a comment with a **summary, line-by-line findings, and committable suggestions** (the CodeRabbit/CodeAnt-style review). It uses the Claude API and **no-ops until configured** — add an **`ANTHROPIC_API_KEY`** repo secret to activate it (optionally set `AI_REVIEW_MODEL`, default `claude-sonnet-4-6`). Until then it skips cleanly and never blocks PRs.
+On every pull request, an AI reviewer posts a comment with a **summary, a per-file walkthrough, an optional Mermaid diagram, line-by-line findings, and committable suggestions** (the CodeRabbit/CodeAnt-style review). It uses the Claude API and **no-ops until configured** — add an **`ANTHROPIC_API_KEY`** repo secret to activate it (optionally set `AI_REVIEW_MODEL`, default `claude-sonnet-4-6`). Reviews re-run automatically on each new commit (incremental).
+
+- **Custom rules:** drop an `.ai-review.json` (`guidelines` + `pathInstructions`) and the reviewer enforces your project's conventions.
+- **PR chat / Q&A:** comment `@sentryscan <question>` on a PR and the AI answers about the diff (`ai-chat.yml`).
 
 Scanner steps are non-gating by default (they report); the integration test gates the build. Tighten `exit-code`/`continue-on-error` to make any scanner block merges.
 

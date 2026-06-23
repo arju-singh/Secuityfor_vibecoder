@@ -1,0 +1,31 @@
+name: AI PR Chat
+
+# Answers questions about a PR's diff when someone comments "@sentryscan ...".
+# No-ops without ANTHROPIC_API_KEY.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ai-chat:
+    name: AI chat
+    # Only PR comments that mention the bot.
+    if: ${{ github.event.issue.pull_request && contains(github.event.comment.body, '@sentryscan') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Answer the question
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: node scripts/ai-chat.mjs
