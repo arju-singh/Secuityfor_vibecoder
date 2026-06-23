@@ -89,6 +89,27 @@ jobs:
             echo "No ESLint config found — skipping. Add eslint.config.js to enable."
           fi
 
+  # SonarCloud (hosted SonarQube) deep static analysis. Skips cleanly until you
+  # add a SONAR_TOKEN secret (so CI stays green before setup). See README.
+  sonarcloud:
+    name: SonarCloud (SonarQube)
+    runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history improves SonarCloud analysis
+      - name: SonarQube scan
+        if: ${{ env.SONAR_TOKEN != '' }}
+        uses: SonarSource/sonarqube-scan-action@v8.2.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarcloud.io
+      - name: Skipped (no SONAR_TOKEN)
+        if: ${{ env.SONAR_TOKEN == '' }}
+        run: echo "SONAR_TOKEN not set — skipping SonarCloud. Add the secret + adjust sonar-project.properties to enable (see README)."
+
   # Google Lighthouse against the running app (perf, a11y, SEO, best-practices).
   lighthouse:
     name: Lighthouse

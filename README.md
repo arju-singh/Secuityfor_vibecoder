@@ -58,6 +58,14 @@ The server listens on `PORT` (default `3000`).
 - **Trivy** — filesystem vuln + secret + misconfig scan
 - **ESLint** — runs if an ESLint config is present (else skipped)
 - **Lighthouse** — boots the app and audits performance / a11y / SEO / best-practices
+- **SonarCloud (SonarQube)** — deep static analysis (bugs, vulns, hotspots, code smells). **Skips until configured** so CI stays green.
+
+### Enabling SonarCloud
+
+1. Sign in at [sonarcloud.io](https://sonarcloud.io) with GitHub and **add/import this repository** (free for public repos).
+2. Note your **organization** and **project key**, and update `sonar-project.properties` to match.
+3. Generate a token (SonarCloud → My Account → Security) and add it to the repo as a secret named **`SONAR_TOKEN`** (Settings → Secrets and variables → Actions).
+4. Push — the `sonarcloud` job will then run; until the token exists it skips cleanly.
 
 Scanner steps are non-gating by default (they report); the integration test gates the build. Tighten `exit-code`/`continue-on-error` to make any scanner block merges.
 
