@@ -1,0 +1,32 @@
+name: AI Code Review
+
+# Posts an AI-generated review (summary + line findings + committable suggestions)
+# on every pull request. No-ops cleanly until ANTHROPIC_API_KEY is set, so it
+# never blocks or errors before setup.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write   # required to post the review comment
+
+jobs:
+  ai-review:
+    name: AI review
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need base + head to diff
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run AI reviewer
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/ai-review.mjs

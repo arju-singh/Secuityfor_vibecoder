@@ -67,6 +67,12 @@ The server listens on `PORT` (default `3000`).
 3. Generate a token (SonarCloud → My Account → Security) and add it to the repo as a secret named **`SONAR_TOKEN`** (Settings → Secrets and variables → Actions).
 4. Push — the `sonarcloud` job will then run; until the token exists it skips cleanly.
 
+- **SBOM** — Trivy generates a CycloneDX Software Bill of Materials, uploaded as a build artifact.
+
+### AI Code Review (`.github/workflows/ai-review.yml`)
+
+On every pull request, an AI reviewer posts a comment with a **summary, line-by-line findings, and committable suggestions** (the CodeRabbit/CodeAnt-style review). It uses the Claude API and **no-ops until configured** — add an **`ANTHROPIC_API_KEY`** repo secret to activate it (optionally set `AI_REVIEW_MODEL`, default `claude-sonnet-4-6`). Until then it skips cleanly and never blocks PRs.
+
 Scanner steps are non-gating by default (they report); the integration test gates the build. Tighten `exit-code`/`continue-on-error` to make any scanner block merges.
 
 ## How it works

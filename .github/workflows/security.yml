@@ -70,6 +70,25 @@ jobs:
           skip-dirs: node_modules,test   # test/ holds intentional fake-secret fixtures
           exit-code: '0'   # report, don't fail the build (tighten to '1' to gate)
 
+  # Software Bill of Materials (CycloneDX) — uploaded as a build artifact.
+  sbom:
+    name: SBOM (CycloneDX)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate SBOM with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: cyclonedx
+          output: sbom.cdx.json
+          skip-dirs: node_modules
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+
   # ESLint — runs only if the project has an ESLint config.
   eslint:
     name: ESLint
