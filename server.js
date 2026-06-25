@@ -15,14 +15,32 @@ import { scanApiSpec } from './src/scanners/apiSpecScanner.js';
 import { scanAudits } from './src/scanners/auditScanner.js';
 import { scoreFindings, summarize } from './src/scanners/scoring.js';
 import { normalizeUrl, runWithAuth } from './src/scanners/util.js';
+import { securityHeaders } from './src/middleware/security.js';
+import { rateLimit } from './src/middleware/rateLimit.js';
+import { validate, websiteSchema, apiSchema } from './src/middleware/validate.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3000;
+const num = (v, d) => (v !== undefined && v !== '' && !Number.isNaN(Number(v)) ? Number(v) : d);
 
 app.disable('x-powered-by');
-app.use(express.json({ limit: '1mb' }));
+// Trust X-Forwarded-* only when explicitly configured — otherwise a client could
+// spoof its IP via X-Forwarded-For and evade rate limits.
+if (process.env.TRUST_PROXY) {
+  app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? true : process.env.TRUST_PROXY);
+}
+
+app.use(securityHeaders);                                   // OWASP secure headers on every response
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json({ limit: '1mb' }));                    // hard cap on JSON body size
+
+// --- Rate limiting (OWASP API4) — defaults overridable via env --------------
+const WINDOW_MS = num(process.env.RATE_LIMIT_WINDOW_MS, 60_000);
+const apiLimiter = rateLimit({ windowMs: WINDOW_MS, max: num(process.env.RATE_LIMIT_API_MAX, 120), name: 'the API' });
+const scanLimiter = rateLimit({ windowMs: WINDOW_MS, max: num(process.env.RATE_LIMIT_SCAN_MAX, 20), name: 'scanning' });
+const fileLimiter = rateLimit({ windowMs: WINDOW_MS, max: num(process.env.RATE_LIMIT_FILE_MAX, 10), name: 'file scanning' });
+app.use('/api', apiLimiter);                                // global limiter on all API routes
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -117,10 +135,11 @@ async function auditSections(target) {
 }
 
 // --- Full website test: UI health + security + render ----------------------
-app.post('/api/test/website', async (req, res) => {
-  const target = req.body && req.body.url;
-  if (!target) return res.status(400).json({ ok: false, error: 'A "url" field is required.' });
-  const includeRender = req.body.render !== false;
+// scanLimiter throttles expensive scans; validate() enforces the request schema.
+app.post('/api/test/website', scanLimiter, validate(websiteSchema), async (req, res) => {
+  const target = req.body.url;          // validated, required, ≤2048 chars
+  const includeRender = req.body.render; // boolean, default true
+  const doAudits = req.body.audits;      // boolean, default true (performance / a11y / SEO)
 
   // Validate/normalize the target up front so an invalid or blocked URL returns
   // a clear error instead of a misleading "all suites unavailable" 100/A report.
@@ -132,7 +151,6 @@ app.post('/api/test/website', async (req, res) => {
 
   const authHeaders = sanitizeHeaders(req.body.headers);
   const authed = Object.keys(authHeaders).length > 0;
-  const doAudits = req.body.audits !== false; // performance / a11y / SEO, on by default
 
   try {
     const results = await runWithAuth(authHeaders, () => Promise.all([
@@ -157,9 +175,8 @@ app.post('/api/test/website', async (req, res) => {
 });
 
 // --- API test --------------------------------------------------------------
-app.post('/api/test/api', async (req, res) => {
-  const target = req.body && req.body.url;
-  if (!target) return res.status(400).json({ ok: false, error: 'A "url" field is required.' });
+app.post('/api/test/api', scanLimiter, validate(apiSchema), async (req, res) => {
+  const target = req.body.url;
   try {
     normalizeUrl(target);
   } catch (e) {
@@ -168,18 +185,16 @@ app.post('/api/test/api', async (req, res) => {
 
   const authHeaders = sanitizeHeaders(req.body.headers);
   const authed = Object.keys(authHeaders).length > 0;
-  const doFuzz = req.body.fuzz === true;
-  const doAccess = req.body.access !== false; // access-control checks on by default
-  const doEnumerate = req.body.enumerate === true;
+  const doFuzz = req.body.fuzz;               // default false
+  const doAccess = req.body.access;           // default true
+  const doEnumerate = req.body.enumerate;     // default false
   const fuzzOpts = {
-    method: req.body.method,
-    body: typeof req.body.body === 'string' ? req.body.body : undefined,
+    method: req.body.method,                  // validated enum (or undefined → GET)
+    body: req.body.body,                       // validated ≤100k string (or undefined)
     contentType: req.body.contentType,
-    allowWrite: req.body.allowWrite === true,
-    rateLimit: req.body.rateLimit === true,
-    customPayloads: Array.isArray(req.body.customPayloads)
-      ? req.body.customPayloads.filter((s) => typeof s === 'string' && s.length <= 2000).slice(0, 15)
-      : undefined
+    allowWrite: req.body.allowWrite,           // default false
+    rateLimit: req.body.rateLimit,             // default false
+    customPayloads: req.body.customPayloads    // validated string[] (≤50 × ≤2000), else undefined
   };
 
   try {
@@ -199,7 +214,7 @@ app.post('/api/test/api', async (req, res) => {
 });
 
 // --- Source-code scan ------------------------------------------------------
-app.post('/api/scan/files', upload.any(), async (req, res) => {
+app.post('/api/scan/files', fileLimiter, upload.any(), async (req, res) => {
   try {
     const files = req.files || [];
     if (!files.length) return res.status(400).json({ ok: false, error: 'No files were uploaded.' });
@@ -237,11 +252,23 @@ app.post('/api/scan/files', upload.any(), async (req, res) => {
   }
 });
 
+// Centralized error handler — maps known errors to safe status codes and never
+// leaks stack traces to the client (OWASP: improper error handling).
 app.use((err, req, res, next) => {
   if (err && err.code === 'LIMIT_FILE_SIZE') {
     return res.status(413).json({ ok: false, error: 'Upload too large (60 MB limit per file).' });
   }
-  res.status(500).json({ ok: false, error: err.message || 'Unexpected server error.' });
+  if (err && err.code && /^LIMIT_/.test(err.code)) {
+    return res.status(400).json({ ok: false, error: 'Upload rejected (too many files or invalid form).' });
+  }
+  if (err && (err.type === 'entity.parse.failed' || err instanceof SyntaxError)) {
+    return res.status(400).json({ ok: false, error: 'Invalid JSON in request body.' });
+  }
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ ok: false, error: 'Request body too large (1 MB limit).' });
+  }
+  console.error('Unhandled error:', err && err.message);
+  res.status(500).json({ ok: false, error: 'Unexpected server error.' });
 });
 
 app.listen(PORT, () => {

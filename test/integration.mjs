@@ -9,6 +9,8 @@ import { scanAccess } from '../src/scanners/accessScanner.js';
 import { scanApiSpec } from '../src/scanners/apiSpecScanner.js';
 import { scanAudits } from '../src/scanners/auditScanner.js';
 import { scanCodeAudit } from '../src/scanners/codeAuditScanner.js';
+import { validateBody, websiteSchema, apiSchema } from '../src/middleware/validate.js';
+import { rateLimit } from '../src/middleware/rateLimit.js';
 import { runWithAuth, fetchWithTimeout } from '../src/scanners/util.js';
 
 let passed = 0, failed = 0;
@@ -237,6 +239,31 @@ try {
   assert(ca.config.some((f) => /localhost/i.test(f.title)), 'config: detects hardcoded localhost');
   assert(ca.testing.some((f) => /empty test/i.test(f.title)), 'testing: detects empty test body');
   assert(ca.hygiene.some((f) => /\.env file/i.test(f.title)), 'hygiene: detects committed .env');
+  // --- 5) Input validation (schema, types, limits, unknown fields) ---------
+  console.log('\n[5] Request validation:');
+  assert(validateBody(websiteSchema, { url: 'x', evil: 1 }).ok === false, 'rejects unexpected fields');
+  assert(validateBody(websiteSchema, {}).ok === false, 'rejects missing required url');
+  assert(validateBody(websiteSchema, { url: 'x', render: 'yes' }).ok === false, 'rejects wrong type (render)');
+  assert(validateBody(websiteSchema, { url: 'a'.repeat(3000) }).ok === false, 'rejects oversized url');
+  const okv = validateBody(websiteSchema, { url: 'https://example.com' });
+  assert(okv.ok && okv.value.render === true && okv.value.audits === true, 'accepts valid input + applies defaults');
+  assert(validateBody(apiSchema, { url: 'x', method: 'TRACE' }).ok === false, 'rejects method not in enum');
+  assert(validateBody(apiSchema, { url: 'x', method: 'post' }).value.method === 'POST', 'normalizes method to uppercase');
+  assert(validateBody(apiSchema, { url: 'x', customPayloads: Array(99).fill('p') }).ok === false, 'rejects too many custom payloads');
+
+  // --- 6) Rate limiting (429 after max, Retry-After) -----------------------
+  console.log('\n[6] Rate limiting:');
+  const fakeReq = () => ({ ip: '203.0.113.7', socket: { remoteAddress: '203.0.113.7' }, headers: {} });
+  const fakeRes = () => ({ code: 200, headers: {}, body: null, set(k, v) { this.headers[k] = v; return this; }, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } });
+  const limiter = rateLimit({ windowMs: 10000, max: 2, name: 'test' });
+  let passed = 0; const next = () => { passed++; };
+  limiter(fakeReq(), fakeRes(), next);
+  limiter(fakeReq(), fakeRes(), next);
+  const blocked = fakeRes();
+  limiter(fakeReq(), blocked, next);
+  assert(passed === 2, 'allows requests up to the limit');
+  assert(blocked.code === 429 && blocked.body && blocked.body.ok === false, 'returns 429 once over the limit');
+  assert(blocked.headers['Retry-After'], 'sets a Retry-After header on 429');
 } finally {
   server.close();
 }

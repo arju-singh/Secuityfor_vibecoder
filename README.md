@@ -126,6 +126,16 @@ Each actionable finding carries a **reproduction PoC** — a copy-paste `curl` c
 
 SentryScan **confirms** vulnerabilities but never **weaponises** them. For SQL injection on a GET query parameter it runs a **non-destructive boolean-based confirmation** (a tautology `1=1` vs a contradiction `1=2`); if responses differ reliably, the parameter is *confirmed* injectable — **without reading or modifying any data**. Server-side template injection is confirmed by safe arithmetic (`7*7`→`49`) and open redirects by following the `Location` header. The tool deliberately does **not** extract data, run OS commands (RCE), modify/delete data, or perform DoS — those require explicit, contextual authorization and are left to manual testing.
 
+## Hardening (the server itself)
+
+SentryScan's own API follows OWASP best practices:
+
+- **Rate limiting** (`src/middleware/rateLimit.js`) — sliding-window, per-IP (and per-credential when an `Authorization` header is present). Global `/api` limit plus stricter limits on the expensive scan and file-upload endpoints. Graceful **HTTP 429** with `Retry-After` + `RateLimit-*` headers. Defaults are tunable via `RATE_LIMIT_*` env vars.
+- **Strict input validation** (`src/middleware/validate.js`) — schema-based allowlisting: type checks, length/enum/array limits, applied defaults, and **rejection of any unexpected field** (no mass-assignment surface). Malformed JSON and oversized bodies return clean 400/413s; errors never leak stack traces.
+- **Secure secret handling** — the server holds **no hard-coded keys**; it reads only `PORT` and `SENTRYSCAN_ALLOW_LOCAL` from the environment, and no secret is exposed to the client. Optional integration keys (`ANTHROPIC_API_KEY`, `SONAR_TOKEN`) live only as CI secrets. See `.env.example`; `.env` is gitignored. User-supplied scan credentials are redacted in reproduction output and never persisted.
+- **Secure response headers** (`src/middleware/security.js`) — strict CSP (`script-src 'self'`), `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, COOP/CORP, and HSTS on every response.
+- **Trust-proxy is opt-in** (`TRUST_PROXY`) so `X-Forwarded-For` can't be spoofed to evade rate limits unless you're behind a trusted proxy.
+
 ## Safety & scope
 
 SentryScan is a **non-intrusive** auditor. The URL scanner issues only ordinary `GET` requests — the same a browser makes — and never attempts exploits. **Parameter fuzzing is GET-only by default** and cannot modify server-side data. Fuzzing a **JSON request body** (and using write methods POST/PUT/PATCH/DELETE) is supported but **off unless you explicitly enable "Allow destructive (write) requests"** — those requests can create or modify data, so only enable them on systems you own or are authorized to test. Either way, fuzzing sends many requests; use it responsibly. Scans of `localhost` and private/internal network addresses are blocked (SSRF protection). The code scanner analyzes files in memory and only contacts OSV.dev to check dependency versions. No scan results are persisted.
