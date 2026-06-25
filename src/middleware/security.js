@@ -1,30 +1,37 @@
-// Security response headers (OWASP Secure Headers Project) applied to every
-// response, including the static UI. script-src is strict 'self' (no inline
-// scripts — the one bootstrap script lives in public/head-init.js). style-src
-// keeps 'unsafe-inline' only because the UI uses inline style attributes;
-// inline styles are a far lower risk than inline scripts.
-const CSP = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data:",
-  "font-src 'self'",
-  "connect-src 'self'",
-  "object-src 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'none'"
-].join('; ');
+// Security response headers via Helmet (the vetted, OWASP-recommended library —
+// safer than hand-rolling). CSP is pinned to the exact policy the UI is verified
+// against: strict script-src 'self' (the one bootstrap script lives in
+// public/head-init.js); style-src keeps 'unsafe-inline' only for the UI's inline
+// style attributes, which are far lower risk than inline scripts.
+import helmet from 'helmet';
 
+const base = helmet({
+  contentSecurityPolicy: {
+    useDefaults: false,
+    directives: {
+      'default-src': ["'self'"],
+      'script-src': ["'self'"],
+      'style-src': ["'self'", "'unsafe-inline'"],
+      'img-src': ["'self'", 'data:'],
+      'font-src': ["'self'"],
+      'connect-src': ["'self'"],
+      'object-src': ["'none'"],
+      'base-uri': ["'self'"],
+      'form-action': ["'self'"],
+      'frame-ancestors': ["'none'"]
+    }
+  },
+  frameguard: { action: 'deny' },              // X-Frame-Options: DENY
+  referrerPolicy: { policy: 'no-referrer' },
+  crossOriginOpenerPolicy: { policy: 'same-origin' },
+  crossOriginResourcePolicy: { policy: 'same-origin' },
+  hsts: { maxAge: 15552000, includeSubDomains: true }
+  // Helmet also sets X-Content-Type-Options: nosniff, X-DNS-Prefetch-Control,
+  // X-Permitted-Cross-Domain-Policies, Origin-Agent-Cluster, etc. by default.
+});
+
+// Helmet does not emit Permissions-Policy; add it alongside Helmet's headers.
 export function securityHeaders(req, res, next) {
-  res.set('Content-Security-Policy', CSP);
-  res.set('X-Content-Type-Options', 'nosniff');
-  res.set('X-Frame-Options', 'DENY');
-  res.set('Referrer-Policy', 'no-referrer');
-  res.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), interest-cohort=()');
-  res.set('Cross-Origin-Opener-Policy', 'same-origin');
-  res.set('Cross-Origin-Resource-Policy', 'same-origin');
-  // HSTS only matters over HTTPS; harmless to send and correct behind TLS.
-  res.set('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
-  next();
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), interest-cohort=()');
+  base(req, res, next);
 }
