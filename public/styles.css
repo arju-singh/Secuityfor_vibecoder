@@ -949,3 +949,51 @@ body.nav-open .nav-toggle span:nth-child(3) { transform: translateY(-7px) rotate
 .opt-box summary::before { content: '▸'; color: var(--accent); margin-right: 8px; display: inline-block; transition: transform .2s; }
 .opt-box[open] summary::before { transform: rotate(90deg); }
 .opt-box .check { margin-top: 6px; }
+
+/* ============================================================================
+   Risk stats + Pricing
+   ========================================================================== */
+.risk-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+.risk-card {
+  background: var(--panel); border: 1px solid var(--glass-brd); border-radius: var(--radius);
+  padding: 26px 22px; backdrop-filter: blur(14px); box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 10px; min-height: 190px;
+}
+.risk-num { font-family: var(--font-display); font-size: 42px; font-weight: 800; line-height: 1; }
+.risk-label { color: var(--text); font-size: 14px; margin: 0; line-height: 1.45; }
+.risk-src { color: var(--faint); font-size: 11.5px; margin-top: auto; }
+
+.pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; align-items: stretch; }
+.price-card {
+  position: relative; background: var(--panel); border: 1px solid var(--glass-brd);
+  border-radius: var(--radius); padding: 32px 26px; backdrop-filter: blur(14px);
+  box-shadow: var(--shadow); display: flex; flex-direction: column;
+}
+.price-card.featured { border-color: rgba(91,139,255,.5); box-shadow: var(--shadow-glow); }
+.price-badge {
+  position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+  background: var(--grad); color: #fff; font-size: 11px; font-weight: 700;
+  padding: 5px 14px; border-radius: 999px; white-space: nowrap;
+}
+.price-name { font-size: 18px; margin: 0 0 8px; }
+.price-amt { font-family: var(--font-display); font-size: 44px; font-weight: 800; line-height: 1; }
+.price-amt span { font-size: 15px; font-weight: 500; color: var(--muted); }
+.price-tag { color: var(--muted); font-size: 13px; margin: 6px 0 20px; }
+.price-feats { list-style: none; padding: 0; margin: 0 0 24px; display: flex; flex-direction: column; gap: 11px; flex: 1; }
+.price-feats li { position: relative; padding-left: 24px; font-size: 13.5px; color: var(--text); line-height: 1.4; }
+.price-feats li::before { content: '✓'; position: absolute; left: 0; color: var(--accent-2); font-weight: 700; }
+.price-feats code { background: rgba(140,160,220,.1); padding: 1px 5px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px; color: #c9d6ff; }
+.price-cta {
+  display: block; text-align: center; padding: 12px 18px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text); font-weight: 600; font-size: 14.5px; transition: .2s;
+}
+.price-cta:hover { border-color: var(--accent); color: #fff; background: rgba(91,139,255,.12); }
+.price-cta.primary { background: var(--grad); border: none; color: #fff; box-shadow: 0 14px 34px -14px rgba(91,139,255,.8); }
+.price-cta.primary:hover { filter: brightness(1.08); }
+.price-note { text-align: center; color: var(--faint); font-size: 12.5px; margin-top: 24px; }
+
+@media (max-width: 920px) {
+  .risk-grid { grid-template-columns: repeat(2, 1fr); }
+  .pricing-grid { grid-template-columns: 1fr; max-width: 430px; margin: 0 auto; }
+}
+@media (max-width: 560px) { .risk-grid { grid-template-columns: 1fr; } }
