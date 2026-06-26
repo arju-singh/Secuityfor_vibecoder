@@ -89,6 +89,21 @@ jobs:
           name: sbom-cyclonedx
           path: sbom.cdx.json
 
+  # Semgrep SAST — 1000+ community rules (OWASP Top 10, secrets, injections).
+  # Uses public rulesets (no token/account needed); reports without gating.
+  semgrep:
+    name: Semgrep SAST
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install semgrep
+      - name: Run Semgrep (public rulesets)
+        run: semgrep scan --config p/owasp-top-ten --config p/secrets --config p/javascript --error --exclude node_modules --exclude test
+        continue-on-error: true
+
   # ESLint — runs only if the project has an ESLint config.
   eslint:
     name: ESLint

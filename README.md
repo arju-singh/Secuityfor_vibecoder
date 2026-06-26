@@ -56,6 +56,7 @@ The server listens on `PORT` (default `3000`).
 - **npm audit** — dependency advisories
 - **Gitleaks** — secret scan across full git history
 - **Trivy** — filesystem vuln + secret + misconfig scan
+- **Semgrep** — SAST with 1000+ community rules (OWASP Top 10, secrets, injections); public rulesets, no token
 - **ESLint** — runs if an ESLint config is present (else skipped)
 - **Lighthouse** — boots the app and audits performance / a11y / SEO / best-practices
 - **SonarCloud (SonarQube)** — deep static analysis (bugs, vulns, hotspots, code smells). **Skips until configured** so CI stays green.
