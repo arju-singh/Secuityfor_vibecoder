@@ -631,9 +631,28 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; }
 .scroll-progress span { display: block; height: 100%; width: 0; background: var(--grad); box-shadow: 0 0 12px rgba(91,139,255,.6); transition: width .1s linear; }
 
 /* Reveal-on-scroll (only when JS is active, to avoid hiding content otherwise) */
-html.js .reveal { opacity: 0; transform: perspective(1200px) rotateX(11deg) translateY(46px) translateZ(-60px); transform-origin: 50% 100%; transition: opacity .8s cubic-bezier(.2,.7,.2,1), transform .8s cubic-bezier(.2,.7,.2,1); transition-delay: var(--reveal-delay, 0ms); will-change: opacity, transform; }
-html.js .reveal.in { opacity: 1; transform: perspective(1200px) rotateX(0deg) translateY(0) translateZ(0); }
-@media (prefers-reduced-motion: reduce) { html.js .reveal { transform: none; } }
+html.js .reveal { opacity: 0; transform: perspective(1100px) rotateX(16deg) translateY(60px) translateZ(-110px); transform-origin: 50% 120%; transition: opacity .85s cubic-bezier(.2,.7,.2,1), transform .85s cubic-bezier(.2,.7,.2,1); transition-delay: var(--reveal-delay, 0ms); will-change: opacity, transform; }
+html.js .reveal.in { opacity: 1; transform: perspective(1100px) rotateX(0deg) translateY(0) translateZ(0); }
+@media (prefers-reduced-motion: reduce) { html.js .reveal { transform: none !important; } }
+
+/* ============================================================================
+   Bold 3D — depth context, pointer-tilt pop, cursor glare
+   ========================================================================== */
+.hero { perspective: 1400px; }
+.hero-copy, .hero-visual { will-change: transform; }
+#features { perspective: 1600px; }
+.feature-grid { transform-style: preserve-3d; transform: rotateX(var(--grid-rx, 0deg)); }
+[data-tilt] { transform-style: preserve-3d; transition: transform .3s cubic-bezier(.2,.7,.2,1); }
+[data-tilt].tilting { transition: transform .05s linear; }
+/* Cursor glare that follows the pointer across tilt cards. */
+.feature-card, .hv-card { position: relative; }
+.feature-card::after, .hv-card::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 3;
+  background: radial-gradient(200px 200px at var(--mx, 50%) var(--my, 0%), rgba(255,255,255,.18), transparent 60%);
+  opacity: 0; transition: opacity .3s;
+}
+.feature-card.tilting::after, .hv-card.tilting::after { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .feature-grid { transform: none !important; } }
 
 /* ============================================================================
    Hero — two column with animated report visual

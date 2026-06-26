@@ -94,13 +94,16 @@
 
   if (reduced) return; // skip continuous-motion effects below
 
-  /* ---- Pointer tilt ------------------------------------------------------- */
+  /* ---- Pointer tilt (bold: depth pop + cursor glare) ---------------------- */
   const tiltEls = document.querySelectorAll('[data-tilt]');
-  const MAX = 7;
+  const MAX = 13;
   tiltEls.forEach((el) => {
-    let raf = null, rx = 0, ry = 0;
+    let raf = null, rx = 0, ry = 0, mx = 50, my = 50;
     const apply = () => {
-      el.style.transform = `perspective(900px) rotateX(${rx}deg) rotateY(${ry}deg)`;
+      el.style.transform =
+        `perspective(820px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg) translateZ(34px) scale(1.018)`;
+      el.style.setProperty('--mx', mx.toFixed(1) + '%');
+      el.style.setProperty('--my', my.toFixed(1) + '%');
       raf = null;
     };
     el.addEventListener('pointermove', (ev) => {
@@ -109,28 +112,76 @@
       const py = (ev.clientY - r.top) / r.height - 0.5;
       ry = px * MAX * 2;
       rx = -py * MAX * 2;
+      mx = (px + 0.5) * 100;
+      my = (py + 0.5) * 100;
+      el.classList.add('tilting');
       if (!raf) raf = requestAnimationFrame(apply);
     });
     el.addEventListener('pointerleave', () => {
-      rx = ry = 0;
+      el.classList.remove('tilting');
       el.style.transform = '';
     });
   });
 
-  /* ---- Hero parallax (subtle) -------------------------------------------- */
-  const orbs = document.querySelectorAll('.hv-orb');
-  if (orbs.length) {
+  /* ---- Whole-hero mouse parallax (layers move at different depths) -------- */
+  const hero = document.querySelector('.hero');
+  const heroCopy = document.querySelector('.hero-copy');
+  const heroVisual = document.querySelector('.hero-visual');
+  if (hero && (heroCopy || heroVisual)) {
+    let raf = null, mx = 0, my = 0;
+    const apply = () => {
+      if (heroCopy) heroCopy.style.transform =
+        `translate3d(${(mx * 12).toFixed(1)}px, ${(my * 9).toFixed(1)}px, 0) rotateY(${(mx * 2.4).toFixed(2)}deg) rotateX(${(-my * 2.4).toFixed(2)}deg)`;
+      if (heroVisual) heroVisual.style.transform =
+        `translate3d(${(mx * 26).toFixed(1)}px, ${(my * 18).toFixed(1)}px, 0) rotateY(${(mx * 3.4).toFixed(2)}deg) rotateX(${(-my * 3.4).toFixed(2)}deg)`;
+      raf = null;
+    };
+    hero.addEventListener('pointermove', (ev) => {
+      const r = hero.getBoundingClientRect();
+      mx = (ev.clientX - r.left) / r.width - 0.5;
+      my = (ev.clientY - r.top) / r.height - 0.5;
+      if (!raf) raf = requestAnimationFrame(apply);
+    });
+    hero.addEventListener('pointerleave', () => {
+      if (heroCopy) heroCopy.style.transform = '';
+      if (heroVisual) heroVisual.style.transform = '';
+    });
+  }
+
+  /* ---- Scroll-linked 3D tilt of the feature grid ------------------------- */
+  const grid = document.querySelector('.feature-grid');
+  const featSection = document.getElementById('features');
+  if (grid && featSection) {
     let ticking = false;
-    const move = () => {
-      const y = window.scrollY;
-      orbs.forEach((o, i) => {
-        const depth = (i + 1) * 0.06;
-        o.style.transform = `translate3d(0, ${(-y * depth).toFixed(1)}px, 0)`;
-      });
+    const update = () => {
+      const r = featSection.getBoundingClientRect();
+      const vh = window.innerHeight || 800;
+      const center = r.top + r.height / 2;
+      const prog = (center - vh / 2) / vh;            // ~ -1 (below) .. 1 (above)
+      const gx = Math.max(-9, Math.min(9, prog * 13)); // tilt the whole plane as it passes
+      grid.style.setProperty('--grid-rx', gx.toFixed(2) + 'deg');
       ticking = false;
     };
     addEventListener('scroll', () => {
-      if (!ticking) { requestAnimationFrame(move); ticking = true; }
+      if (!ticking) { requestAnimationFrame(update); ticking = true; }
     }, { passive: true });
+    update();
   }
+
+  /* ---- Background + orb depth parallax on scroll -------------------------- */
+  const orbs = document.querySelectorAll('.hv-orb');
+  const gridBg = document.querySelector('.bg-grid'); // aurora keeps its own drift animation
+  let ticking = false;
+  const onScroll = () => {
+    const y = window.scrollY;
+    orbs.forEach((o, i) => {
+      const depth = (i + 1) * 0.12;
+      o.style.transform = `translate3d(0, ${(-y * depth).toFixed(1)}px, 0)`;
+    });
+    if (gridBg) gridBg.style.transform = `translate3d(0, ${(y * 0.16).toFixed(1)}px, 0)`;
+    ticking = false;
+  };
+  addEventListener('scroll', () => {
+    if (!ticking) { requestAnimationFrame(onScroll); ticking = true; }
+  }, { passive: true });
 })();
