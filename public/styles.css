@@ -499,7 +499,8 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; }
 .owasp-covers { font-size: 12.5px; color: var(--muted); }
 .owasp-badge { font-size: 11px; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
 .owasp-badge.auto { background: rgba(47, 224, 176, .14); color: var(--accent-2); border: 1px solid rgba(47,224,176,.5); }
-.owasp-badge.manual { background: rgba(148, 160, 189, .1); color: var(--muted); border: 1px solid var(--border); }
+.owasp-badge.manual { background: rgba(255, 140, 66, .14); color: var(--high); border: 1px solid rgba(255,140,66,.5); }
+.owasp-badge.context { background: rgba(148, 160, 189, .1); color: var(--muted); border: 1px solid var(--border); }
 
 .roadmap { display: flex; flex-direction: column; gap: 9px; }
 .roadmap-step {

@@ -376,6 +376,32 @@ const BIZLOGIC = [
   ['Document impact & fix', 'For each finding, record the exact requests, why it violates intended behaviour, and the business impact (money, data, privilege). Fix = enforce state & authorization server-side, recompute trusted values, make one-time actions atomic/idempotent.']
 ];
 
+// Full ethical-hacking domain map. tag: 'auto' (SentryScan scans it),
+// 'manual' (do by hand), 'context' (background — out of a web/code scanner's scope).
+const KNOWLEDGE = [
+  ['1. Ethical Hacking foundations', 'Definition, purpose, hacker types, legal/ethical considerations', 'context'],
+  ['2. Networking basics', 'TCP/IP, OSI model, subnetting, DNS, DHCP', 'context'],
+  ['3. Operating systems', 'Linux, Windows, macOS, command-line basics', 'context'],
+  ['4. Cybersecurity fundamentals', 'Encryption, firewalls, antivirus, IDS/IPS', 'context'],
+  ['5. Programming languages', 'Python, JavaScript, Bash, SQL, C/C++/Java/Ruby', 'context'],
+  ['6. Scanning & enumeration', 'Service/version fingerprinting, exposed paths & dev endpoints, OpenAPI enumeration, vuln scanning (no raw port scan)', 'auto'],
+  ['7. Exploitation', 'CVEs, Metasploit, buffer overflows — SentryScan confirms (boolean SQLi/SSTI/redirect) but never weaponizes', 'manual'],
+  ['8. Web application security', 'OWASP Top 10, SQL injection, XSS — the core of SentryScan', 'auto'],
+  ['9. Wireless network hacking', 'Wi-Fi, WEP/WPA/WPA2, wireless attacks', 'context'],
+  ['10. Social engineering', 'Phishing, spear phishing, SET', 'context'],
+  ['11. Sniffing & spoofing', 'MITM, ARP spoofing, DNS spoofing', 'context'],
+  ['12. Malware analysis', 'Malware types, sandboxing, signature/behavior detection', 'context'],
+  ['13. Incident response & forensics', 'IR process, digital forensics, chain of custody', 'context'],
+  ['14. Penetration testing', 'Types, methodology, reporting — see the methodology + reproduction PoCs above', 'manual'],
+  ['15. Cryptography', 'Symmetric/asymmetric, hashing, signatures — SentryScan checks TLS/HTTPS, weak transport, exposed keys', 'auto'],
+  ['16. Mobile hacking', 'Android/iOS & mobile app security', 'context'],
+  ['17. Cloud security', 'AWS/Azure/GCP best practices (cloud-account config needs creds — out of scope)', 'context'],
+  ['18. IoT security', 'IoT risks, securing devices', 'context'],
+  ['19. Legal & compliance', 'CFAA, GDPR, HIPAA, PCI DSS — always get written authorization before testing', 'context'],
+  ['20. Cybersecurity tools', 'Nmap, Wireshark, Burp, Snort, Nessus, Aircrack — SentryScan bundles Trivy, Gitleaks, SonarCloud, Lighthouse, OSV', 'manual'],
+  ['21. Careers & certifications', 'CEH, OSCP, CISSP, CompTIA Security+', 'context']
+];
+
 const OWASP_ROWS = [
   ['A01', 'Broken Access Control', 'Directory listing, missing CSRF tokens, open redirect, exposed admin/.git paths', true],
   ['A02', 'Cryptographic Failures', 'No HTTPS, weak/expired TLS, weak HSTS, secrets & keys in page source', true],
@@ -469,6 +495,19 @@ function buildLearnContent() {
     row.querySelector('.owasp-name').textContent = name;
     row.querySelector('.owasp-covers').textContent = covers;
     tbl.appendChild(row);
+  });
+
+  const kb = document.getElementById('knowledge-base');
+  if (kb) KNOWLEDGE.forEach(([name, covers, tag]) => {
+    const row = document.createElement('div');
+    row.className = 'owasp-row';
+    const cls = tag === 'auto' ? 'auto' : (tag === 'manual' ? 'manual' : 'context');
+    row.innerHTML = `<div class="owasp-body"><span class="owasp-name"></span><span class="owasp-covers"></span></div>
+      <span class="owasp-badge ${cls}"></span>`;
+    row.querySelector('.owasp-name').textContent = name;
+    row.querySelector('.owasp-covers').textContent = covers;
+    row.querySelector('.owasp-badge').textContent = tag;
+    kb.appendChild(row);
   });
 
   const rm = document.getElementById('roadmap');
