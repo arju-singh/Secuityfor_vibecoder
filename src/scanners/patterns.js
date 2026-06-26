@@ -271,7 +271,8 @@ export const SENSITIVE_FILES = [
 export const SCANNABLE_EXT = new Set([
   'js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'json', 'html', 'htm', 'css', 'scss',
   'env', 'yml', 'yaml', 'xml', 'php', 'py', 'rb', 'java', 'go', 'sh', 'bash',
-  'txt', 'md', 'ini', 'conf', 'config', 'properties', 'pem', 'key', 'sql', 'vue', 'svelte'
+  'txt', 'md', 'ini', 'conf', 'config', 'properties', 'pem', 'key', 'sql', 'vue', 'svelte',
+  'cs', 'c', 'cpp', 'cc', 'h', 'hpp'
 ]);
 
 export function extOf(path) {

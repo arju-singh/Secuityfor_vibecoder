@@ -997,3 +997,12 @@ body.nav-open .nav-toggle span:nth-child(3) { transform: translateY(-7px) rotate
   .pricing-grid { grid-template-columns: 1fr; max-width: 430px; margin: 0 auto; }
 }
 @media (max-width: 560px) { .risk-grid { grid-template-columns: 1fr; } }
+
+/* --- Paste-code block ----------------------------------------------------- */
+.paste-block { margin-top: 22px; }
+.paste-divider { display: flex; align-items: center; gap: 14px; color: var(--faint); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 14px; }
+.paste-divider::before, .paste-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.paste-row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+.paste-go { width: auto; margin-top: 0; padding: 11px 20px; }
+.paste-go:disabled { opacity: .45; cursor: not-allowed; }
+#paste-input { width: 100%; box-sizing: border-box; font-family: var(--font-mono); font-size: 12.5px; min-height: 150px; resize: vertical; }

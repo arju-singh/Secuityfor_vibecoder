@@ -311,6 +311,27 @@
           <ul id="file-list" class="file-list"></ul>
         </div>
         <button id="code-btn" class="primary-btn" disabled>Analyze code</button>
+
+        <div class="paste-block">
+          <div class="paste-divider"><span>or paste code</span></div>
+          <div class="paste-row">
+            <select id="paste-lang" class="fuzz-select" aria-label="Language">
+              <option value="js">JavaScript</option>
+              <option value="ts">TypeScript</option>
+              <option value="py">Python</option>
+              <option value="php">PHP</option>
+              <option value="rb">Ruby</option>
+              <option value="go">Go</option>
+              <option value="java">Java</option>
+              <option value="cs">C#</option>
+              <option value="cpp">C / C++</option>
+              <option value="txt">Other / text</option>
+            </select>
+            <button type="button" id="paste-btn" class="primary-btn paste-go" disabled>Scan pasted code</button>
+          </div>
+          <textarea id="paste-input" class="auth-input" rows="9" spellcheck="false" placeholder="Paste your code here — secrets, dangerous patterns, and risky calls are detected. Nothing is executed; the code is analyzed as text only."></textarea>
+        </div>
+
         <p class="hint">Detects: leaked API keys &amp; secrets · private keys · hardcoded passwords · eval/innerHTML/SQL-injection patterns · committed .env/.git files · known-vulnerable npm / PyPI / Composer / RubyGems dependencies (via OSV.dev).</p>
       </section>
 

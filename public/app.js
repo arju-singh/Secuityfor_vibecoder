@@ -111,6 +111,26 @@ codeBtn.addEventListener('click', async () => {
     fetch('/api/scan/files', { method: 'POST', body: fd }));
 });
 
+// --- Paste code ------------------------------------------------------------
+// Pasted code is sent as a single in-memory file to the same /api/scan/files
+// endpoint — it is analyzed as TEXT only and never executed.
+const pasteInput = document.getElementById('paste-input');
+const pasteBtn = document.getElementById('paste-btn');
+const pasteLang = document.getElementById('paste-lang');
+if (pasteInput && pasteBtn) {
+  pasteInput.addEventListener('input', () => { pasteBtn.disabled = pasteInput.value.trim() === ''; });
+  pasteBtn.addEventListener('click', async () => {
+    const code = pasteInput.value;
+    if (!code.trim()) return;
+    const ext = (pasteLang && pasteLang.value) || 'txt';
+    const blob = new Blob([code], { type: 'text/plain' });
+    const fd = new FormData();
+    fd.append('files', blob, 'pasted.' + ext);
+    await runScan('Analyzing pasted code …', () =>
+      fetch('/api/scan/files', { method: 'POST', body: fd }));
+  });
+}
+
 // --- Runner ----------------------------------------------------------------
 async function runScan(loadingText, requestFn) {
   show('loading'); hide('results'); hide('error');
