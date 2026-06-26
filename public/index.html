@@ -187,8 +187,16 @@
           <input type="text" id="website-input" placeholder="saucedemo.com  or  https://the-internet.herokuapp.com" autocomplete="off" spellcheck="false" />
           <button type="submit">Run test</button>
         </form>
-        <label class="check"><input type="checkbox" id="render-toggle" checked /> Include live JavaScript / render test (headless browser)</label>
-        <label class="check"><input type="checkbox" id="audits-toggle" checked /> Include quality audits (performance · accessibility · SEO)</label>
+        <div class="presets">
+          <p class="presets-label">Try a known practice site:</p>
+          <div class="preset-chips" data-target="website-input"></div>
+        </div>
+        <details class="opt-box">
+          <summary>⚙ Scan options</summary>
+          <label class="check"><input type="checkbox" id="render-toggle" checked /> Include live JavaScript / render test (headless browser)</label>
+          <label class="check"><input type="checkbox" id="audits-toggle" checked /> Include quality audits (performance · accessibility · SEO)</label>
+          <p class="hint">Runs four suites: <strong>UI health</strong> (load, broken links/resources, titles, forms, accessibility) · <strong>Security</strong> (headers, TLS, cookies, exposed files) · <strong>Vulnerabilities &amp; OWASP</strong> (CSP/SRI weaknesses, outdated libraries, TRACE/XST, CORS reflection, open redirect, unsafe HTTP methods, exposed dev/debug endpoints, GraphQL introspection, directory listing, data exposure, reflected-input &amp; SQL-error probes — mapped to the OWASP Top 10) · <strong>Render</strong> (JS console errors, failed requests, blank-page detection).</p>
+        </details>
         <details class="auth-box">
           <summary>🔐 Authenticated scan (optional)</summary>
           <p class="auth-hint">Send these headers with every request so the scanner tests pages as a logged-in user. One per line — e.g. <code>Authorization: Bearer …</code> or <code>Cookie: session=…</code>. Only use credentials you own.</p>
@@ -201,11 +209,6 @@
             <button type="button" class="profile-del link-btn">Delete</button>
           </div>
         </details>
-        <p class="hint">Runs four suites: <strong>UI health</strong> (load, broken links/resources, titles, forms, accessibility) · <strong>Security</strong> (headers, TLS, cookies, exposed files) · <strong>Vulnerabilities &amp; OWASP</strong> (CSP/SRI weaknesses, outdated libraries, TRACE/XST, CORS reflection, open redirect, unsafe HTTP methods, exposed dev/debug endpoints, GraphQL introspection, directory listing, data exposure, reflected-input &amp; SQL-error probes — mapped to the OWASP Top 10) · <strong>Render</strong> (JS console errors, failed requests, blank-page detection).</p>
-        <div class="presets">
-          <p class="presets-label">Try a known practice site:</p>
-          <div class="preset-chips" data-target="website-input"></div>
-        </div>
       </section>
 
       <!-- API panel -->
@@ -216,10 +219,17 @@
           <input type="text" id="api-input" placeholder="https://jsonplaceholder.typicode.com/posts/1" autocomplete="off" spellcheck="false" />
           <button type="submit">Test endpoint</button>
         </form>
-        <p class="hint">Checks: reachability · status code · response time · JSON validity · content-type · CORS · supported methods · auth behavior · HTTPS.</p>
-        <label class="check"><input type="checkbox" id="fuzz-toggle" /> Fuzz query parameters (sends crafted inputs — SQLi, XSS, path traversal, command injection, SSTI — to each parameter)</label>
-        <label class="check"><input type="checkbox" id="enumerate-toggle" /> Enumerate endpoints from the API's OpenAPI/Swagger spec</label>
-        <label class="check"><input type="checkbox" id="ratelimit-toggle" /> Test rate limiting (sends a burst of requests)</label>
+        <div class="presets">
+          <p class="presets-label">Try a known practice API:</p>
+          <div class="preset-chips" data-target="api-input"></div>
+        </div>
+        <details class="opt-box">
+          <summary>⚙ Scan options</summary>
+          <p class="hint" style="margin-top:0">Checks: reachability · status code · response time · JSON validity · content-type · CORS · supported methods · auth behavior · HTTPS.</p>
+          <label class="check"><input type="checkbox" id="fuzz-toggle" /> Fuzz query parameters (sends crafted inputs — SQLi, XSS, path traversal, command injection, SSTI — to each parameter)</label>
+          <label class="check"><input type="checkbox" id="enumerate-toggle" /> Enumerate endpoints from the API's OpenAPI/Swagger spec</label>
+          <label class="check"><input type="checkbox" id="ratelimit-toggle" /> Test rate limiting (sends a burst of requests)</label>
+        </details>
         <details class="auth-box" id="fuzz-advanced">
           <summary>🧬 Advanced: fuzz a request body (POST/PUT/PATCH)</summary>
           <p class="auth-hint">Fuzz the fields of a JSON request body. Requires the fuzz checkbox above.</p>
@@ -250,10 +260,6 @@
             <button type="button" class="profile-del link-btn">Delete</button>
           </div>
         </details>
-        <div class="presets">
-          <p class="presets-label">Try a known practice API:</p>
-          <div class="preset-chips" data-target="api-input"></div>
-        </div>
       </section>
 
       <!-- Code panel -->
