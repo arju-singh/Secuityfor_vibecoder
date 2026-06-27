@@ -15,9 +15,13 @@ import { scanApiSpec } from './src/scanners/apiSpecScanner.js';
 import { scanAudits } from './src/scanners/auditScanner.js';
 import { scoreFindings, summarize } from './src/scanners/scoring.js';
 import { normalizeUrl, runWithAuth } from './src/scanners/util.js';
+import cookieParser from 'cookie-parser';
 import { securityHeaders } from './src/middleware/security.js';
-import { rateLimit } from './src/middleware/rateLimit.js';
-import { validate, websiteSchema, apiSchema } from './src/middleware/validate.js';
+import { rateLimit, clientKey } from './src/middleware/rateLimit.js';
+import { validate, websiteSchema, apiSchema, credentialsSchema } from './src/middleware/validate.js';
+import { hashPassword, verifyPassword, issueToken, verifyToken, setAuthCookie, clearAuthCookie, requireAuth } from './src/auth/auth.js';
+import { getUser, hasUser, putUser } from './src/auth/store.js';
+import { checkLock, recordFailure, recordSuccess } from './src/auth/bruteforce.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -34,13 +38,69 @@ if (process.env.TRUST_PROXY) {
 app.use(securityHeaders);                                   // OWASP secure headers on every response
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json({ limit: '1mb' }));                    // hard cap on JSON body size
+app.use(cookieParser());                                    // parse the auth cookie
 
 // --- Rate limiting (OWASP API4) — defaults overridable via env --------------
 const WINDOW_MS = num(process.env.RATE_LIMIT_WINDOW_MS, 60_000);
 const apiLimiter = rateLimit({ windowMs: WINDOW_MS, max: num(process.env.RATE_LIMIT_API_MAX, 120), name: 'the API' });
 const scanLimiter = rateLimit({ windowMs: WINDOW_MS, max: num(process.env.RATE_LIMIT_SCAN_MAX, 20), name: 'scanning' });
 const fileLimiter = rateLimit({ windowMs: WINDOW_MS, max: num(process.env.RATE_LIMIT_FILE_MAX, 10), name: 'file scanning' });
+// Strict limiter for auth endpoints (a second layer behind brute-force lockout).
+const authLimiter = rateLimit({ windowMs: WINDOW_MS, max: num(process.env.RATE_LIMIT_AUTH_MAX, 12), name: 'authentication' });
 app.use('/api', apiLimiter);                                // global limiter on all API routes
+
+// Optional: require login for the scan endpoints (off by default — non-breaking).
+const gate = process.env.REQUIRE_AUTH === '1' ? requireAuth : (req, res, next) => next();
+
+// --- Authentication: JWT cookie auth (bcrypt) + brute-force prevention ------
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+app.post('/api/auth/register', authLimiter, validate(credentialsSchema), async (req, res) => {
+  const { email, password } = req.body;
+  if (!EMAIL_RE.test(email)) return res.status(400).json({ ok: false, error: 'Enter a valid email address.' });
+  if (hasUser(email)) return res.status(409).json({ ok: false, error: 'An account with that email already exists.' });
+  const hash = await hashPassword(password);
+  putUser(email, hash);
+  setAuthCookie(req, res, issueToken(email.toLowerCase()));
+  res.json({ ok: true, user: { email: email.toLowerCase() } });
+});
+
+app.post('/api/auth/login', authLimiter, validate(credentialsSchema), async (req, res) => {
+  const { email, password } = req.body;
+  const keys = [`email:${email.toLowerCase()}`, `ip:${clientKey(req)}`];
+  const locked = checkLock(keys);
+  if (locked) {
+    res.set('Retry-After', String(locked));
+    return res.status(429).json({ ok: false, error: `Too many failed attempts. Try again in ${locked}s.` });
+  }
+  const user = getUser(email);
+  // verifyPassword falls back to a dummy hash when the user is absent, so the
+  // response time is the same whether or not the account exists.
+  const ok = await verifyPassword(password, user && user.passwordHash);
+  if (!user || !ok) {
+    recordFailure(keys);
+    return res.status(401).json({ ok: false, error: 'Invalid email or password.' });
+  }
+  recordSuccess(keys);
+  setAuthCookie(req, res, issueToken(user.email));
+  res.json({ ok: true, user: { email: user.email } });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  clearAuthCookie(res);
+  res.json({ ok: true });
+});
+
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  res.json({ ok: true, user: req.user });
+});
+
+// Non-failing session probe for the UI (always 200, so it never logs a console error).
+app.get('/api/auth/session', (req, res) => {
+  const token = req.cookies && req.cookies.sentry_token;
+  const payload = token && verifyToken(token);
+  res.json({ ok: true, authenticated: !!payload, user: payload ? { email: payload.sub } : null });
+});
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -136,7 +196,7 @@ async function auditSections(target) {
 
 // --- Full website test: UI health + security + render ----------------------
 // scanLimiter throttles expensive scans; validate() enforces the request schema.
-app.post('/api/test/website', scanLimiter, validate(websiteSchema), async (req, res) => {
+app.post('/api/test/website', gate, scanLimiter, validate(websiteSchema), async (req, res) => {
   const target = req.body.url;          // validated, required, ≤2048 chars
   const includeRender = req.body.render; // boolean, default true
   const doAudits = req.body.audits;      // boolean, default true (performance / a11y / SEO)
@@ -175,7 +235,7 @@ app.post('/api/test/website', scanLimiter, validate(websiteSchema), async (req, 
 });
 
 // --- API test --------------------------------------------------------------
-app.post('/api/test/api', scanLimiter, validate(apiSchema), async (req, res) => {
+app.post('/api/test/api', gate, scanLimiter, validate(apiSchema), async (req, res) => {
   const target = req.body.url;
   try {
     normalizeUrl(target);
@@ -214,7 +274,7 @@ app.post('/api/test/api', scanLimiter, validate(apiSchema), async (req, res) => 
 });
 
 // --- Source-code scan ------------------------------------------------------
-app.post('/api/scan/files', fileLimiter, upload.any(), async (req, res) => {
+app.post('/api/scan/files', gate, fileLimiter, upload.any(), async (req, res) => {
   try {
     const files = req.files || [];
     if (!files.length) return res.status(400).json({ ok: false, error: 'No files were uploaded.' });

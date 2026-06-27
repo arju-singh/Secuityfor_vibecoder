@@ -80,6 +80,11 @@ export const websiteSchema = {
   headers: { type: 'headers' }
 };
 
+export const credentialsSchema = {
+  email: { type: 'string', required: true, maxLength: 254, minLength: 3 },
+  password: { type: 'string', required: true, maxLength: 200, minLength: 8, trim: false }
+};
+
 export const apiSchema = {
   url: { type: 'string', required: true, maxLength: URL_MAX },
   headers: { type: 'headers' },

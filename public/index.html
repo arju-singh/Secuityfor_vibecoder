@@ -46,8 +46,27 @@
       <a class="ghost-link" href="https://owasp.org/Top10/" target="_blank" rel="noopener noreferrer">OWASP ↗</a>
     </nav>
     <button class="nav-toggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="primary-nav"><span></span><span></span><span></span></button>
+    <button class="nav-signin" id="nav-signin" type="button">Sign in</button>
+    <span class="nav-account" id="nav-account" hidden><span id="nav-email"></span> · <button type="button" class="link-btn" id="nav-logout">Log out</button></span>
     <a class="nav-cta" href="#scanner">Run a scan</a>
   </header>
+
+  <!-- Auth modal -->
+  <div class="auth-modal" id="auth-modal" hidden>
+    <div class="auth-backdrop" data-auth-close></div>
+    <div class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+      <button class="auth-x" type="button" data-auth-close aria-label="Close">×</button>
+      <h3 class="auth-title" id="auth-title">Sign in</h3>
+      <p class="auth-sub" id="auth-sub">Welcome back — sign in to your SentryScan account.</p>
+      <form id="auth-form" novalidate>
+        <input type="email" id="auth-email" placeholder="you@example.com" autocomplete="email" required />
+        <input type="password" id="auth-password" placeholder="Password (min 8 characters)" autocomplete="current-password" minlength="8" required />
+        <button type="submit" class="primary-cta auth-submit" id="auth-submit">Sign in</button>
+      </form>
+      <p class="auth-err" id="auth-err" hidden></p>
+      <p class="auth-switch" id="auth-switch">New here? <button type="button" class="link-btn" id="auth-toggle">Create an account</button></p>
+    </div>
+  </div>
 
   <main id="top" class="container">
 
@@ -631,5 +650,6 @@
 
   <script src="app.js"></script>
   <script src="ui.js"></script>
+  <script src="auth.js"></script>
 </body>
 </html>

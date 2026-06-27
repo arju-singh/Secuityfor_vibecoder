@@ -14,3 +14,6 @@ npm-debug.log*
 # Playwright
 /test-results/
 /playwright-report/
+
+# Local user store (bcrypt hashes) — never commit
+data/

@@ -9,8 +9,10 @@ import { scanAccess } from '../src/scanners/accessScanner.js';
 import { scanApiSpec } from '../src/scanners/apiSpecScanner.js';
 import { scanAudits } from '../src/scanners/auditScanner.js';
 import { scanCodeAudit } from '../src/scanners/codeAuditScanner.js';
-import { validateBody, websiteSchema, apiSchema } from '../src/middleware/validate.js';
+import { validateBody, websiteSchema, apiSchema, credentialsSchema } from '../src/middleware/validate.js';
 import { rateLimit } from '../src/middleware/rateLimit.js';
+import { hashPassword, verifyPassword, issueToken, verifyToken } from '../src/auth/auth.js';
+import * as bf from '../src/auth/bruteforce.js';
 import { runWithAuth, fetchWithTimeout } from '../src/scanners/util.js';
 
 let passed = 0, failed = 0;
@@ -264,6 +266,24 @@ try {
   assert(passed === 2, 'allows requests up to the limit');
   assert(blocked.code === 429 && blocked.body && blocked.body.ok === false, 'returns 429 once over the limit');
   assert(blocked.headers['Retry-After'], 'sets a Retry-After header on 429');
+  // --- 7) Authentication: bcrypt + JWT + brute-force ----------------------
+  console.log('\n[7] Authentication:');
+  const h = await hashPassword('S3curePass!');
+  assert(h.startsWith('$2') && h !== 'S3curePass!', 'bcrypt stores a salted hash, not plaintext');
+  assert(await verifyPassword('S3curePass!', h) === true, 'correct password verifies');
+  assert(await verifyPassword('wrong-password', h) === false, 'wrong password rejected');
+  assert(await verifyPassword('whatever', null) === false, 'absent user compares safely (no throw)');
+  const tok = issueToken('user@example.com');
+  assert(verifyToken(tok) && verifyToken(tok).sub === 'user@example.com', 'valid JWT verifies to its subject');
+  assert(verifyToken(tok + 'tampered') === null, 'tampered JWT is rejected');
+  assert(verifyToken('not-a-token') === null, 'garbage token rejected');
+  const keys = ['email:bf@test', 'ip:198.51.100.9'];
+  for (let i = 0; i < 5; i++) bf.recordFailure(keys);
+  assert(bf.checkLock(keys) > 0, 'account locks out after repeated failures');
+  bf.recordSuccess(keys);
+  assert(bf.checkLock(keys) === 0, 'successful login clears the lockout');
+  assert(validateBody(credentialsSchema, { email: 'a@b.com' }).ok === false, 'login requires a password');
+  assert(validateBody(credentialsSchema, { email: 'a@b.com', password: 'short' }).ok === false, 'rejects passwords under 8 chars');
 } finally {
   server.close();
 }
