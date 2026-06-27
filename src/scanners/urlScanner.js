@@ -173,7 +173,14 @@ function checkHeaders(headers, isHttps) {
     if (isHttps && !flags.includes('secure')) missing.push('Secure');
     if (!flags.includes('httponly')) missing.push('HttpOnly');
     if (!flags.includes('samesite')) missing.push('SameSite');
-    if (missing.length) {
+    // A JWT/session token in a cookie that JS can read is XSS-stealable.
+    const looksJwt = /=\s*eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\./.test(c);
+    const looksSession = /(sess|session|token|jwt|auth)/i.test(name);
+    if ((looksJwt || looksSession) && !flags.includes('httponly')) {
+      findings.push(finding('high', `Session/JWT cookie "${name}" is not HttpOnly`,
+        `The cookie "${name}" looks like a session or JWT token but lacks HttpOnly, so any XSS payload can read and steal it (session hijacking).`,
+        'Set HttpOnly (plus Secure and SameSite) on authentication/session cookies; never store JWTs where client JS can read them.', c.slice(0, 120)));
+    } else if (missing.length) {
       findings.push(finding('medium', `Cookie "${name}" missing flags: ${missing.join(', ')}`,
         'Cookies without these flags are exposed to theft via XSS, interception, or CSRF.',
         `Set the ${missing.join(', ')} attribute(s) on this cookie.`, c.slice(0, 120)));

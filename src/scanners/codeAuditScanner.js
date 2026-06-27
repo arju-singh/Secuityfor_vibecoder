@@ -54,6 +54,9 @@ function seccodeChecks(files) {
   const code = files.filter((x) => CODE_EXT.has(x.ext));
   let clientSecret = 0, weakRandom = 0, corsWild = 0, badCookie = 0, fileUpload = 0, csrfGet = 0, vHtml = 0;
   let debugMode = 0;
+  // Auth-security checks: password hashing, JWT handling, login brute-force.
+  let weakHash = 0, plaintextPw = 0, jwtStorage = 0, jwtNone = 0, jwtHardSecret = 0;
+  let hasLoginRoute = false, hasRateLimit = false;
   for (const x of code) {
     clientSecret += count(/\b(NEXT_PUBLIC_|VITE_|REACT_APP_)\w*(SECRET|KEY|TOKEN|PASSWORD|PRIVATE|APIKEY)/gi, x.content);
     // Math.random() near a security-sensitive word
@@ -70,6 +73,18 @@ function seccodeChecks(files) {
     fileUpload += count(/multer\(\s*\{(?![^}]*(limits|fileFilter))/g, x.content);
     csrfGet += count(/\.get\(\s*['"][^'"]+['"][^]{0,200}?\b(\.create\(|\.update\(|\.destroy\(|\.delete\(|\.save\(|INSERT |UPDATE |DELETE )/gi, x.content);
     vHtml += count(/v-html\s*=|\{@html\s/g, x.content);
+    // Weak password hashing (md5/sha1 used on a password) — should be bcrypt/argon2/scrypt.
+    weakHash += count(/(password|passwd|pwd)[^;\n]{0,40}\b(md5|sha1)\b|\b(md5|sha1)\b[^;\n]{0,40}(password|passwd|pwd)|createHash\(\s*['"](md5|sha1)['"]\s*\)[^;\n]{0,40}(password|passwd|pwd)/gi, x.content);
+    // Plaintext password comparison (no hash verify).
+    plaintextPw += count(/password\s*===?\s*req\.(body|query|params)\.\w+|req\.(body|query|params)\.password\s*===?\s*['"]/gi, x.content);
+    // JWT/token persisted in localStorage/sessionStorage (XSS-stealable) — prefer an httpOnly cookie.
+    jwtStorage += count(/(localStorage|sessionStorage)\.setItem\(\s*['"][^'"]*(token|jwt|auth|session|access)/gi, x.content);
+    // JWT 'none' algorithm — signature bypass.
+    jwtNone += count(/alg(orithm)?s?['"]?\s*[:=]\s*\[?\s*['"]none['"]/gi, x.content);
+    // Hardcoded JWT signing secret.
+    jwtHardSecret += count(/jwt\.sign\([^)]*,\s*['"][^'"]{6,}['"]/gi, x.content);
+    if (/['"]\/(login|signin|sign-in|sessions?)\b|app\.(post|put)\(\s*['"][^'"]*(login|signin|auth)/i.test(x.content)) hasLoginRoute = true;
+    if (/express-rate-limit|rate-limiter-flexible|@fastify\/rate-limit|express-slow-down|express-brute/i.test(x.content)) hasRateLimit = true;
   }
   for (const x of files) debugMode += count(/\bDEBUG\s*=\s*['"]?\*|['"]?debug['"]?\s*:\s*true/gi, x.content);
 
@@ -81,6 +96,13 @@ function seccodeChecks(files) {
   if (csrfGet) f.push(finding('high', `${csrfGet} state-changing GET route(s)`, 'Mutations behind GET requests are CSRF-able and can be triggered by a link/image.', 'Use POST/PUT/DELETE for mutations and validate anti-CSRF tokens.'));
   if (vHtml) f.push(finding('critical', `${vHtml} raw-HTML binding(s) (v-html / {@html})`, 'Binding unsanitized HTML (v-html, Svelte {@html}) is an XSS vector.', 'Avoid raw HTML bindings; sanitize with DOMPurify if unavoidable.'));
   if (debugMode) f.push(finding('high', `${debugMode} debug-mode flag(s) enabled`, 'DEBUG=* / debug:true in committed config leaks internals in production.', 'Disable debug mode in production builds.'));
+  // ---- Auth-security findings ----
+  if (weakHash) f.push(finding('critical', `${weakHash} password(s) hashed with a weak algorithm (md5/sha1)`, 'MD5/SHA-1 are fast and unsalted — passwords hashed with them are trivially cracked.', 'Hash passwords with bcrypt, argon2, or scrypt (slow, salted KDFs).'));
+  if (plaintextPw) f.push(finding('critical', `${plaintextPw} plaintext password comparison(s)`, 'Comparing a password directly to request input means passwords are stored/handled in plaintext.', 'Store only a bcrypt/argon2 hash and verify with the library\'s compare function.'));
+  if (jwtNone) f.push(finding('critical', `${jwtNone} JWT "none" algorithm usage`, 'Allowing the "none" algorithm lets attackers forge tokens with no signature.', 'Pin a strong algorithm (HS256/RS256) and reject "none".'));
+  if (jwtHardSecret) f.push(finding('high', `${jwtHardSecret} hardcoded JWT signing secret(s)`, 'A signing secret committed in code can be used to forge valid tokens.', 'Load the JWT secret from an environment variable / secrets manager.'));
+  if (jwtStorage) f.push(finding('high', `${jwtStorage} token(s) stored in localStorage/sessionStorage`, 'Tokens in web storage are readable by any XSS payload. Prefer an httpOnly, SameSite cookie.', 'Store session JWTs in an httpOnly + Secure + SameSite cookie, not localStorage.'));
+  if (hasLoginRoute && !hasRateLimit) f.push(finding('high', 'Login endpoint without brute-force protection', 'A login/auth route is present but no rate-limiting / lockout library was detected — credential stuffing and brute-force are unmitigated.', 'Add per-account + per-IP rate limiting and lockout (e.g. express-rate-limit) on auth endpoints.'));
   if (!f.length) f.push(finding('info', 'No in-code security anti-patterns detected', 'Pattern-based code-security checks passed.', 'Still run SAST (Semgrep/CodeQL) for depth.'));
   return f;
 }

@@ -227,6 +227,7 @@ try {
     { path: 'src/app.js', buffer: enc("import express from 'express';\nimport made from 'totally-made-up-pkg';\nconsole.log(1);console.log(2);console.log(3);console.log(4);console.log(5);\nconst u='http://localhost:3000';\nconst s=process.env.NEXT_PUBLIC_API_SECRET;\nfetch('/x').then(r=>r.json());\nasync function f(a){return a.map(async x=>await g(x));}\n// TODO: finish\nexpress();made();\n") },
     { path: 'src/App.jsx', buffer: enc('export default function App(){return (<div><img src="/x.png"><a target="_blank" href="/y">y</a></div>);}') },
     { path: 'src/app.test.js', buffer: enc("test('nothing', () => {});") },
+    { path: 'src/auth.js', buffer: enc("import crypto from 'crypto';\nconst h = crypto.createHash('md5').update(password).digest('hex');\nif (password === req.body.pass) login();\nlocalStorage.setItem('jwt', token);\njwt.sign(payload, 'hardcoded-secret-value', { algorithm: 'none' });\napp.post('/login', (req,res)=>{ res.end(); });\n") },
     { path: '.env', buffer: enc('SECRET=abc123') }
   ];
   const ca = scanCodeAudit(codeEntries);
@@ -241,6 +242,12 @@ try {
   assert(ca.config.some((f) => /localhost/i.test(f.title)), 'config: detects hardcoded localhost');
   assert(ca.testing.some((f) => /empty test/i.test(f.title)), 'testing: detects empty test body');
   assert(ca.hygiene.some((f) => /\.env file/i.test(f.title)), 'hygiene: detects committed .env');
+  // Auth-security checks (JWT cookie auth / bcrypt / brute-force)
+  assert(ca.seccode.some((f) => /weak algorithm \(md5\/sha1\)/i.test(f.title)), 'seccode: detects weak password hashing (use bcrypt)');
+  assert(ca.seccode.some((f) => /localStorage\/sessionStorage/i.test(f.title)), 'seccode: detects JWT in localStorage (use httpOnly cookie)');
+  assert(ca.seccode.some((f) => /"none" algorithm/i.test(f.title)), 'seccode: detects JWT none algorithm');
+  assert(ca.seccode.some((f) => /hardcoded JWT/i.test(f.title)), 'seccode: detects hardcoded JWT secret');
+  assert(ca.seccode.some((f) => /brute-force protection/i.test(f.title)), 'seccode: detects login without brute-force protection');
   // --- 5) Input validation (schema, types, limits, unknown fields) ---------
   console.log('\n[5] Request validation:');
   assert(validateBody(websiteSchema, { url: 'x', evil: 1 }).ok === false, 'rejects unexpected fields');
