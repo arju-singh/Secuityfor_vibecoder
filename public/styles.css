@@ -1013,6 +1013,7 @@ body.nav-open .nav-toggle span:nth-child(3) { transform: translateY(-7px) rotate
 .nav-signin { background: none; border: 1px solid var(--border); color: var(--text); padding: 8px 16px; border-radius: 999px; font-size: 14px; font-weight: 600; cursor: pointer; transition: .18s; }
 .nav-signin:hover { border-color: var(--accent); background: rgba(91,139,255,.1); }
 .nav-account { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.nav-account[hidden] { display: none; }   /* class display must not override the hidden attribute */
 .nav-account .link-btn { font-size: 13px; }
 
 .auth-modal { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; }
