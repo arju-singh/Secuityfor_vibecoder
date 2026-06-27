@@ -231,7 +231,7 @@ try {
     { path: 'src/app.js', buffer: enc("import express from 'express';\nimport made from 'totally-made-up-pkg';\nconsole.log(1);console.log(2);console.log(3);console.log(4);console.log(5);\nconst u='http://localhost:3000';\nconst s=process.env.NEXT_PUBLIC_API_SECRET;\nfetch('/x').then(r=>r.json());\nasync function f(a){return a.map(async x=>await g(x));}\n// TODO: finish\nexpress();made();\n") },
     { path: 'src/App.jsx', buffer: enc('export default function App(){return (<div><img src="/x.png"><a target="_blank" href="/y">y</a></div>);}') },
     { path: 'src/app.test.js', buffer: enc("test('nothing', () => {});") },
-    { path: 'src/auth.js', buffer: enc("import crypto from 'crypto';\nconst h = crypto.createHash('md5').update(password).digest('hex');\nif (password === req.body.pass) login();\nlocalStorage.setItem('jwt', token);\njwt.sign(payload, 'hardcoded-secret-value', { algorithm: 'none' });\napp.post('/login', (req,res)=>{ res.end(); });\n") },
+    { path: 'src/auth.js', buffer: enc("import crypto from 'crypto';\nconst h = crypto.createHash('md5').update(password).digest('hex');\nif (password === req.body.pass) login();\nlocalStorage.setItem('jwt', token);\njwt.sign(payload, 'hardcoded-secret-value', { algorithm: 'none' });\nconst apiToken = crypto.randomBytes(8).toString('hex');\nif (req.headers['x-api-key'] === apiKey) ok();\napp.post('/login', (req,res)=>{ res.end(); });\n") },
     { path: '.env', buffer: enc('SECRET=abc123') }
   ];
   const ca = scanCodeAudit(codeEntries);
@@ -252,6 +252,21 @@ try {
   assert(ca.seccode.some((f) => /"none" algorithm/i.test(f.title)), 'seccode: detects JWT none algorithm');
   assert(ca.seccode.some((f) => /hardcoded JWT/i.test(f.title)), 'seccode: detects hardcoded JWT secret');
   assert(ca.seccode.some((f) => /brute-force protection/i.test(f.title)), 'seccode: detects login without brute-force protection');
+  assert(ca.seccode.some((f) => /weak \/ low-entropy/i.test(f.title)), 'seccode: detects weak/short token generation (randomBytes(8))');
+  assert(ca.seccode.some((f) => /plaintext API\/access-key/i.test(f.title)), 'seccode: detects plaintext access-key comparison');
+  // Auth-security positives + custom-lockout false-positive fix
+  const goodAuth = scanCodeAudit([{ path: 'auth.js', buffer: enc(
+    "import bcrypt from 'bcryptjs';\n" +
+    "const hash = await bcrypt.hash(password, 12);\n" +
+    "res.cookie('sid', token, { httpOnly: true, secure: true, sameSite: 'strict' });\n" +
+    "const sessionToken = crypto.randomBytes(32).toString('base64url');\n" +
+    "app.post('/login', (req,res)=>{ if (checkLock(keys)) return res.status(429).end(); recordFailure(keys); });\n"
+  ) }]).seccode;
+  assert(goodAuth.some((f) => /Strong password hashing/i.test(f.title)), 'seccode+: affirms bcrypt password hashing');
+  assert(goodAuth.some((f) => /Hardened session cookie/i.test(f.title)), 'seccode+: affirms hardened (httpOnly+secure+sameSite) cookie');
+  assert(goodAuth.some((f) => /secure token generation/i.test(f.title)), 'seccode+: affirms cryptographically-secure token generation');
+  assert(goodAuth.some((f) => /Brute-force lockout detected/i.test(f.title)), 'seccode+: affirms custom brute-force lockout');
+  assert(!goodAuth.some((f) => /Login endpoint without brute-force/i.test(f.title)), 'seccode+: no false positive on custom (non-library) lockout');
   // --- 5) Input validation (schema, types, limits, unknown fields) ---------
   console.log('\n[5] Request validation:');
   assert(validateBody(websiteSchema, { url: 'x', evil: 1 }).ok === false, 'rejects unexpected fields');

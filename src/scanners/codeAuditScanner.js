@@ -56,7 +56,10 @@ function seccodeChecks(files) {
   let debugMode = 0;
   // Auth-security checks: password hashing, JWT handling, login brute-force.
   let weakHash = 0, plaintextPw = 0, jwtStorage = 0, jwtNone = 0, jwtHardSecret = 0;
+  let weakToken = 0, plaintextKey = 0;
   let hasLoginRoute = false, hasRateLimit = false;
+  // Positive signals — good practices to affirm, not just anti-patterns to flag.
+  let strongHash = false, hardenedCookie = false, secureToken = false, hasLockout = false;
   for (const x of code) {
     clientSecret += count(/\b(NEXT_PUBLIC_|VITE_|REACT_APP_)\w*(SECRET|KEY|TOKEN|PASSWORD|PRIVATE|APIKEY)/gi, x.content);
     // Math.random() near a security-sensitive word
@@ -69,6 +72,8 @@ function seccodeChecks(files) {
     for (const m of x.content.matchAll(/\.cookie\(/g)) {
       const slice = x.content.slice(m.index, m.index + 200);
       if (!/httpOnly/i.test(slice) || !/secure/i.test(slice)) badCookie++;
+      // Positive: a cookie carrying all three hardening flags.
+      else if (/sameSite/i.test(slice)) hardenedCookie = true;
     }
     fileUpload += count(/multer\(\s*\{(?![^}]*(limits|fileFilter))/g, x.content);
     csrfGet += count(/\.get\(\s*['"][^'"]+['"][^]{0,200}?\b(\.create\(|\.update\(|\.destroy\(|\.delete\(|\.save\(|INSERT |UPDATE |DELETE )/gi, x.content);
@@ -84,7 +89,31 @@ function seccodeChecks(files) {
     // Hardcoded JWT signing secret.
     jwtHardSecret += count(/jwt\.sign\([^)]*,\s*['"][^'"]{6,}['"]/gi, x.content);
     if (/['"]\/(login|signin|sign-in|sessions?)\b|app\.(post|put)\(\s*['"][^'"]*(login|signin|auth)/i.test(x.content)) hasLoginRoute = true;
-    if (/express-rate-limit|rate-limiter-flexible|@fastify\/rate-limit|express-slow-down|express-brute/i.test(x.content)) hasRateLimit = true;
+    // Brute-force / rate-limit protection — recognize both known libraries AND a
+    // hand-rolled limiter/lockout (so a custom implementation isn't a false positive).
+    if (/express-rate-limit|rate-limiter-flexible|@fastify\/rate-limit|express-slow-down|express-brute|\brateLimit\s*\(|\bcheckLock\b|\brecordFailure\b|\blockedFor\b|\block(?:ed)?Until\b|\bMAX_FAILS\b|failed_?attempts|login_?attempts|res\.status\(\s*429|\b429\b[^;\n]{0,40}(?:too many|retry)/i.test(x.content)) hasRateLimit = true;
+    // A genuine per-account/per-key lockout mechanism (stronger signal than a bare limiter).
+    if (/\bcheckLock\b|\brecordFailure\b|\blockedFor\b|\block(?:ed)?Until\b|\bMAX_FAILS\b|express-brute|rate-limiter-flexible|failed_?attempts|\blockout\b/i.test(x.content)) hasLockout = true;
+
+    // Weak / low-entropy security tokens. Flag randomBytes(<16) in a security
+    // context, and random/hash values truncated to a short length; affirm strong ones.
+    for (const m of x.content.matchAll(/randomBytes\(\s*(\d+)\s*\)/g)) {
+      const n = Number(m[1]);
+      const ctx = x.content.slice(Math.max(0, m.index - 80), m.index + 80);
+      if (!/token|secret|key|session|otp|nonce|reset|verif|api|auth|csrf|password/i.test(ctx)) continue;
+      if (n >= 16) secureToken = true; else weakToken++;
+    }
+    // Generated randomness truncated to < 16 chars (e.g. randomBytes(...).slice(0, 8)) — too
+    // short for a token. (Truncating a plain hash digest, e.g. for a cache key, is not flagged.)
+    weakToken += count(/(?:randomBytes\([^)]*\)|randomUUID\(\))[^;\n]{0,40}\.(?:slice|substring|substr)\(\s*0\s*,\s*(?:[0-9]|1[0-5])\s*\)/gi, x.content);
+    if (/randomUUID\s*\(/.test(x.content) && /token|session|key|reset|verif|nonce|api/i.test(x.content)) secureToken = true;
+
+    // Plaintext API/access-key comparison (no hash) — analogous to plaintextPw.
+    plaintextKey += count(/\b(?:api[_-]?key|access[_-]?key|secret[_-]?key|client[_-]?secret)\b\s*[!=]==?\s*(?:req\.(?:body|query|params|headers|cookies)|['"][^'"]{6,}['"])/gi, x.content);
+    plaintextKey += count(/req\.(?:headers|query|body|params|cookies)(?:\.\w+|\[\s*['"][\w-]+['"]\s*\])\s*[!=]==?\s*\b(?:api[_-]?key|access[_-]?key|secret[_-]?key|client[_-]?secret)\b/gi, x.content);
+
+    // Positive: strong password hashing in a credential context.
+    if (/\b(?:bcrypt|bcryptjs|argon2|scrypt(?:Sync)?|pbkdf2)\b/i.test(x.content) && /password|passwd|pwd|hash|credential/i.test(x.content)) strongHash = true;
   }
   for (const x of files) debugMode += count(/\bDEBUG\s*=\s*['"]?\*|['"]?debug['"]?\s*:\s*true/gi, x.content);
 
@@ -102,7 +131,14 @@ function seccodeChecks(files) {
   if (jwtNone) f.push(finding('critical', `${jwtNone} JWT "none" algorithm usage`, 'Allowing the "none" algorithm lets attackers forge tokens with no signature.', 'Pin a strong algorithm (HS256/RS256) and reject "none".'));
   if (jwtHardSecret) f.push(finding('high', `${jwtHardSecret} hardcoded JWT signing secret(s)`, 'A signing secret committed in code can be used to forge valid tokens.', 'Load the JWT secret from an environment variable / secrets manager.'));
   if (jwtStorage) f.push(finding('high', `${jwtStorage} token(s) stored in localStorage/sessionStorage`, 'Tokens in web storage are readable by any XSS payload. Prefer an httpOnly, SameSite cookie.', 'Store session JWTs in an httpOnly + Secure + SameSite cookie, not localStorage.'));
-  if (hasLoginRoute && !hasRateLimit) f.push(finding('high', 'Login endpoint without brute-force protection', 'A login/auth route is present but no rate-limiting / lockout library was detected — credential stuffing and brute-force are unmitigated.', 'Add per-account + per-IP rate limiting and lockout (e.g. express-rate-limit) on auth endpoints.'));
+  if (weakToken) f.push(finding('high', `${weakToken} weak / low-entropy security token(s)`, 'Tokens, keys, or session IDs built from too few random bytes (<16) or truncated to a short length are guessable and brute-forceable.', 'Generate tokens from >=16 cryptographically-random bytes — e.g. crypto.randomBytes(18).toString("base64url") (~24 URL-safe chars / ~144 bits) — and do not truncate them.'));
+  if (plaintextKey) f.push(finding('high', `${plaintextKey} plaintext API/access-key comparison(s)`, 'Comparing an API or access key directly against request input means the key is stored and handled in plaintext — exposed in logs, DB dumps, and timing side-channels.', 'Store only a hash of the key (bcrypt/argon2, or an HMAC-SHA-256 for high-rate lookups), verify with a constant-time compare, and reveal the raw key only once at creation.'));
+  if (hasLoginRoute && !hasRateLimit) f.push(finding('high', 'Login endpoint without brute-force protection', 'A login/auth route is present but no rate-limiting / lockout (library or custom) was detected — credential stuffing and brute-force are unmitigated.', 'Add per-account + per-IP rate limiting and lockout (e.g. express-rate-limit, or a custom failed-attempt counter) on auth endpoints.'));
+  // ---- Positive affirmations (good practices detected) ----
+  if (strongHash) f.push(finding('info', 'Strong password hashing detected (bcrypt/argon2/scrypt)', 'Passwords appear to be hashed with a slow, salted KDF — the recommended practice.', 'Keep the work factor current (e.g. bcrypt cost >= 12) and re-hash on login when it increases.'));
+  if (hardenedCookie) f.push(finding('info', 'Hardened session cookie detected (httpOnly + secure + sameSite)', 'A cookie is set with httpOnly, Secure, and SameSite — protecting it from XSS theft and cross-site sending.', 'No action needed; keep these flags on every auth/session cookie.'));
+  if (secureToken) f.push(finding('info', 'Cryptographically-secure token generation detected', 'Tokens/keys appear to use crypto.randomBytes (>=16 bytes) or randomUUID — unpredictable, sufficient-entropy values.', 'No action needed; ensure tokens stay >=128 bits and URL-safe where used in links.'));
+  if (hasLoginRoute && hasLockout) f.push(finding('info', 'Brute-force lockout detected on authentication', 'A login route is paired with a failed-attempt lockout mechanism that throttles repeated guesses.', 'No action needed; ensure the counter is keyed per-account and per-IP and is shared across instances in a multi-node deploy.'));
   if (!f.length) f.push(finding('info', 'No in-code security anti-patterns detected', 'Pattern-based code-security checks passed.', 'Still run SAST (Semgrep/CodeQL) for depth.'));
   return f;
 }
