@@ -13,6 +13,8 @@ import { validateBody, websiteSchema, apiSchema, credentialsSchema } from '../sr
 import { rateLimit } from '../src/middleware/rateLimit.js';
 import { hashPassword, verifyPassword, issueToken, verifyToken } from '../src/auth/auth.js';
 import * as bf from '../src/auth/bruteforce.js';
+import { parseRepoUrl, safeExtract } from '../src/scanners/githubScanner.js';
+import AdmZip from 'adm-zip';
 import { runWithAuth, fetchWithTimeout } from '../src/scanners/util.js';
 
 let passed = 0, failed = 0;
@@ -291,6 +293,20 @@ try {
   assert(bf.checkLock(keys) === 0, 'successful login clears the lockout');
   assert(validateBody(credentialsSchema, { email: 'a@b.com' }).ok === false, 'login requires a password');
   assert(validateBody(credentialsSchema, { email: 'a@b.com', password: 'short' }).ok === false, 'rejects passwords under 8 chars');
+  // --- 8) GitHub repo scanner (SSRF-safe parsing + safe extraction) -------
+  console.log('\n[8] GitHub repo scanner:');
+  assert(parseRepoUrl('https://github.com/owner/repo').repo === 'repo', 'parses owner/repo');
+  assert(parseRepoUrl('https://github.com/owner/repo.git').repo === 'repo', 'strips .git suffix');
+  assert(parseRepoUrl('https://github.com/owner/repo/tree/main').ref === 'main', 'parses branch ref');
+  assert(parseRepoUrl('http://evil.com/owner/repo') === null, 'rejects non-github host (SSRF protection)');
+  assert(parseRepoUrl('https://gitlab.com/a/b') === null, 'rejects non-github host (gitlab)');
+  assert(parseRepoUrl('https://github.com/../../etc') === null, 'rejects path traversal in URL');
+  const z = new AdmZip();
+  z.addFile('myrepo-abc123/app.js', Buffer.from('const k = "AKIAIOSFODNN7EXAMPLE";'));
+  z.addFile('myrepo-abc123/node_modules/dep.js', Buffer.from('ignored();'));
+  const ents = safeExtract(z.toBuffer());
+  assert(ents.some((e) => e.path === 'app.js'), 'safeExtract strips the archive top folder');
+  assert(!ents.some((e) => e.path.includes('node_modules')), 'safeExtract skips node_modules');
 } finally {
   server.close();
 }

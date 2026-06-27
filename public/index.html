@@ -331,6 +331,15 @@
         </div>
         <button id="code-btn" class="primary-btn" disabled>Analyze code</button>
 
+        <div class="gh-block">
+          <div class="paste-divider"><span>or scan a GitHub repo</span></div>
+          <form id="gh-form" class="url-form">
+            <input type="text" id="gh-input" placeholder="https://github.com/owner/repo" autocomplete="off" spellcheck="false" />
+            <button type="submit">Scan repo</button>
+          </form>
+          <p class="auth-hint" style="margin-top:8px">Public repos. The archive is downloaded (size-capped) and analyzed as text — nothing is executed. Host is locked to github.com (SSRF-safe).</p>
+        </div>
+
         <div class="paste-block">
           <div class="paste-divider"><span>or paste code</span></div>
           <div class="paste-row">

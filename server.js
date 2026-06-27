@@ -9,6 +9,7 @@ import { scanVuln } from './src/scanners/vulnScanner.js';
 import { scanRender } from './src/scanners/renderScanner.js';
 import { scanCode, entriesFromZip } from './src/scanners/codeScanner.js';
 import { scanCodeAudit } from './src/scanners/codeAuditScanner.js';
+import { fetchRepoEntries } from './src/scanners/githubScanner.js';
 import { scanApiFuzz } from './src/scanners/apiFuzzScanner.js';
 import { scanAccess } from './src/scanners/accessScanner.js';
 import { scanApiSpec } from './src/scanners/apiSpecScanner.js';
@@ -18,7 +19,7 @@ import { normalizeUrl, runWithAuth } from './src/scanners/util.js';
 import cookieParser from 'cookie-parser';
 import { securityHeaders } from './src/middleware/security.js';
 import { rateLimit, clientKey } from './src/middleware/rateLimit.js';
-import { validate, websiteSchema, apiSchema, credentialsSchema } from './src/middleware/validate.js';
+import { validate, websiteSchema, apiSchema, credentialsSchema, githubSchema } from './src/middleware/validate.js';
 import { hashPassword, verifyPassword, issueToken, verifyToken, setAuthCookie, clearAuthCookie, requireAuth } from './src/auth/auth.js';
 import { getUser, hasUser, putUser } from './src/auth/store.js';
 import { checkLock, recordFailure, recordSuccess } from './src/auth/bruteforce.js';
@@ -273,7 +274,26 @@ app.post('/api/test/api', gate, scanLimiter, validate(apiSchema), async (req, re
   }
 });
 
-// --- Source-code scan ------------------------------------------------------
+// Build all code-scan sections (secrets/deps + the native audits) from entries.
+async function buildCodeSections(entries) {
+  const scan = await scanCode(entries);
+  const sections = [{ category: 'code', label: 'Source code', meta: scan.meta, findings: scan.findings }];
+  try {
+    const audit = scanCodeAudit(entries);
+    sections.push(
+      { category: 'seccode', label: 'Code security', meta: {}, findings: audit.seccode },
+      { category: 'deps', label: 'Dependencies', meta: {}, findings: audit.deps },
+      { category: 'quality', label: 'Code quality', meta: {}, findings: audit.quality },
+      { category: 'frontend', label: 'Frontend quality', meta: {}, findings: audit.frontend },
+      { category: 'config', label: 'Config & DevOps', meta: {}, findings: audit.config },
+      { category: 'testing', label: 'Testing', meta: {}, findings: audit.testing },
+      { category: 'hygiene', label: 'Project hygiene', meta: {}, findings: audit.hygiene }
+    );
+  } catch (e) { /* audit is best-effort; core code scan already succeeded */ }
+  return sections;
+}
+
+// --- Source-code scan (upload) ---------------------------------------------
 app.post('/api/scan/files', gate, fileLimiter, upload.any(), async (req, res) => {
   try {
     const files = req.files || [];
@@ -291,24 +311,22 @@ app.post('/api/scan/files', gate, fileLimiter, upload.any(), async (req, res) =>
     }
     if (!entries.length) return res.status(400).json({ ok: false, error: 'No analyzable files found in the upload.' });
 
-    const scan = await scanCode(entries);
-    const sections = [{ category: 'code', label: 'Source code', meta: scan.meta, findings: scan.findings }];
-    // Native static-analysis audits (quality, frontend, config, testing, hygiene).
-    try {
-      const audit = scanCodeAudit(entries);
-      sections.push(
-        { category: 'seccode', label: 'Code security', meta: {}, findings: audit.seccode },
-        { category: 'deps', label: 'Dependencies', meta: {}, findings: audit.deps },
-        { category: 'quality', label: 'Code quality', meta: {}, findings: audit.quality },
-        { category: 'frontend', label: 'Frontend quality', meta: {}, findings: audit.frontend },
-        { category: 'config', label: 'Config & DevOps', meta: {}, findings: audit.config },
-        { category: 'testing', label: 'Testing', meta: {}, findings: audit.testing },
-        { category: 'hygiene', label: 'Project hygiene', meta: {}, findings: audit.hygiene }
-      );
-    } catch (e) { /* audit is best-effort; core code scan already succeeded */ }
+    const sections = await buildCodeSections(entries);
     res.json(buildReport('code', sections, { files: files.length }));
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// --- Source-code scan (GitHub repo) ----------------------------------------
+// SSRF-safe (host hard-coded to GitHub) + bomb-safe (size/entry caps).
+app.post('/api/scan/github', gate, fileLimiter, validate(githubSchema), async (req, res) => {
+  try {
+    const { meta, entries } = await fetchRepoEntries(req.body.url);
+    const sections = await buildCodeSections(entries);
+    res.json(buildReport('code', sections, { repo: meta.repo, ref: meta.ref, files: meta.files }));
+  } catch (e) {
+    res.status(e.status || 400).json({ ok: false, error: e.message });
   }
 });
 

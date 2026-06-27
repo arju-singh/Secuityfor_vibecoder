@@ -111,6 +111,21 @@ codeBtn.addEventListener('click', async () => {
     fetch('/api/scan/files', { method: 'POST', body: fd }));
 });
 
+// --- GitHub repo scan ------------------------------------------------------
+const ghForm = document.getElementById('gh-form');
+if (ghForm) {
+  ghForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const url = document.getElementById('gh-input').value.trim();
+    if (!url) return;
+    await runScan('Fetching & scanning ' + url + ' …', () =>
+      fetch('/api/scan/github', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      }));
+  });
+}
+
 // --- Paste code ------------------------------------------------------------
 // Pasted code is sent as a single in-memory file to the same /api/scan/files
 // endpoint — it is analyzed as TEXT only and never executed.
