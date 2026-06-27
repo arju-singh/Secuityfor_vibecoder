@@ -88,6 +88,25 @@
     signedOut();
   });
 
+  // Pricing → Stripe Checkout. Requires login; redirects to Stripe's hosted page.
+  document.querySelectorAll('.price-cta[data-plan]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const plan = btn.dataset.plan;
+      const sess = await fetch('/api/auth/session', { credentials: 'same-origin' }).then((r) => r.json()).catch(() => ({}));
+      if (!sess.authenticated) { setMode('register'); openModal(); return; }
+      try {
+        const res = await fetch('/api/billing/checkout', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin', body: JSON.stringify({ plan })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.url) { window.location.href = data.url; return; }
+        alert(data.error || 'Checkout is unavailable right now.');
+      } catch { alert('Network error starting checkout.'); }
+    });
+  });
+
   // Restore session on load (always-200 probe, so no console noise when logged out).
   fetch('/api/auth/session', { credentials: 'same-origin' })
     .then((r) => (r.ok ? r.json() : null))

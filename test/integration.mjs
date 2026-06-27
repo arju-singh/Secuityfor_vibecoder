@@ -15,6 +15,8 @@ import { hashPassword, verifyPassword, issueToken, verifyToken } from '../src/au
 import * as bf from '../src/auth/bruteforce.js';
 import { parseRepoUrl, safeExtract } from '../src/scanners/githubScanner.js';
 import AdmZip from 'adm-zip';
+import { isConfigured as billingConfigured, planChangeFromEvent, createCheckoutSession } from '../src/billing/billing.js';
+import { putUser, setUserPlan, getUser } from '../src/auth/store.js';
 import { runWithAuth, fetchWithTimeout } from '../src/scanners/util.js';
 
 let passed = 0, failed = 0;
@@ -307,6 +309,19 @@ try {
   const ents = safeExtract(z.toBuffer());
   assert(ents.some((e) => e.path === 'app.js'), 'safeExtract strips the archive top folder');
   assert(!ents.some((e) => e.path.includes('node_modules')), 'safeExtract skips node_modules');
+
+  // --- 9) Billing (Stripe) — config guard, event mapping, plan store ------
+  console.log('\n[9] Billing:');
+  assert(billingConfigured() === false, 'billing reports not-configured without STRIPE_SECRET_KEY');
+  let threw = false;
+  try { await createCheckoutSession('a@b.com', 'pro', 'http://x'); } catch (e) { threw = e.status === 503; }
+  assert(threw, 'checkout refuses cleanly (503) when billing is not configured');
+  const chg = planChangeFromEvent({ type: 'checkout.session.completed', data: { object: { metadata: { email: 'pay@test.com', plan: 'pro' } } } });
+  assert(chg && chg.email === 'pay@test.com' && chg.plan === 'pro', 'maps checkout.session.completed -> plan change');
+  assert(planChangeFromEvent({ type: 'invoice.paid', data: { object: {} } }) === null, 'ignores unrelated events');
+  putUser('plan@test.com', 'x');
+  setUserPlan('plan@test.com', 'pro');
+  assert(getUser('plan@test.com').plan === 'pro', 'webhook plan update persists to the user store');
 } finally {
   server.close();
 }

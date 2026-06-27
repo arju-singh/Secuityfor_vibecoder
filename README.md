@@ -127,6 +127,10 @@ Each actionable finding carries a **reproduction PoC** — a copy-paste `curl` c
 
 SentryScan **confirms** vulnerabilities but never **weaponises** them. For SQL injection on a GET query parameter it runs a **non-destructive boolean-based confirmation** (a tautology `1=1` vs a contradiction `1=2`); if responses differ reliably, the parameter is *confirmed* injectable — **without reading or modifying any data**. Server-side template injection is confirmed by safe arithmetic (`7*7`→`49`) and open redirects by following the `Location` header. The tool deliberately does **not** extract data, run OS commands (RCE), modify/delete data, or perform DoS — those require explicit, contextual authorization and are left to manual testing.
 
+## Accounts & billing
+
+JWT cookie auth (bcrypt, brute-force lockout) gates optional features; see the auth section in `.env.example`. **Billing** uses **Stripe Checkout** (hosted — card data never touches this server). It activates only when `STRIPE_SECRET_KEY` is set (use **test keys** first); until then the endpoints report "not configured" and the UI prompts sign-in. A signature-verified webhook (`/api/billing/webhook`) is the **only** thing that grants a paid plan — the browser is never trusted to report payment. Configure `STRIPE_PRICE_PRO` / `STRIPE_PRICE_TEAM` and `STRIPE_WEBHOOK_SECRET` to enable.
+
 ## Hardening (the server itself)
 
 SentryScan's own API follows OWASP best practices:

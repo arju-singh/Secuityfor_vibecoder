@@ -19,10 +19,11 @@ import { normalizeUrl, runWithAuth } from './src/scanners/util.js';
 import cookieParser from 'cookie-parser';
 import { securityHeaders } from './src/middleware/security.js';
 import { rateLimit, clientKey } from './src/middleware/rateLimit.js';
-import { validate, websiteSchema, apiSchema, credentialsSchema, githubSchema } from './src/middleware/validate.js';
+import { validate, websiteSchema, apiSchema, credentialsSchema, githubSchema, billingSchema } from './src/middleware/validate.js';
 import { hashPassword, verifyPassword, issueToken, verifyToken, setAuthCookie, clearAuthCookie, requireAuth } from './src/auth/auth.js';
-import { getUser, hasUser, putUser } from './src/auth/store.js';
+import { getUser, hasUser, putUser, setUserPlan } from './src/auth/store.js';
 import { checkLock, recordFailure, recordSuccess } from './src/auth/bruteforce.js';
+import { isConfigured as billingConfigured, createCheckoutSession, constructEvent, planChangeFromEvent } from './src/billing/billing.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -38,7 +39,10 @@ if (process.env.TRUST_PROXY) {
 
 app.use(securityHeaders);                                   // OWASP secure headers on every response
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.json({ limit: '1mb' }));                    // hard cap on JSON body size
+// Parse JSON for everything EXCEPT the Stripe webhook, which needs the raw body
+// to verify its signature.
+const jsonParser = express.json({ limit: '1mb' });
+app.use((req, res, next) => (req.path === '/api/billing/webhook' ? next() : jsonParser(req, res, next)));
 app.use(cookieParser());                                    // parse the auth cookie
 
 // --- Rate limiting (OWASP API4) — defaults overridable via env --------------
@@ -100,7 +104,38 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 app.get('/api/auth/session', (req, res) => {
   const token = req.cookies && req.cookies.sentry_token;
   const payload = token && verifyToken(token);
-  res.json({ ok: true, authenticated: !!payload, user: payload ? { email: payload.sub } : null });
+  const user = payload ? getUser(payload.sub) : null;
+  res.json({ ok: true, authenticated: !!payload, user: payload ? { email: payload.sub, plan: (user && user.plan) || 'free' } : null });
+});
+
+// --- Billing (Stripe Checkout) — skips cleanly until STRIPE_SECRET_KEY is set --
+app.get('/api/billing/plan', requireAuth, (req, res) => {
+  const u = getUser(req.user.email);
+  res.json({ ok: true, plan: (u && u.plan) || 'free', billingEnabled: billingConfigured() });
+});
+
+// Start a hosted Checkout session (must be logged in).
+app.post('/api/billing/checkout', requireAuth, validate(billingSchema), async (req, res) => {
+  try {
+    const origin = `${req.protocol}://${req.get('host')}`;
+    const session = await createCheckoutSession(req.user.email, req.body.plan, origin);
+    res.json({ ok: true, url: session.url });
+  } catch (e) {
+    res.status(e.status || 400).json({ ok: false, error: e.message });
+  }
+});
+
+// Stripe webhook — signature-verified; the ONLY thing that grants a paid plan.
+app.post('/api/billing/webhook', express.raw({ type: '*/*' }), (req, res) => {
+  let event;
+  try {
+    event = constructEvent(req.body, req.headers['stripe-signature']);
+  } catch (e) {
+    return res.status(400).json({ ok: false, error: `Webhook signature verification failed: ${e.message}` });
+  }
+  const change = planChangeFromEvent(event);
+  if (change && change.email) setUserPlan(change.email, change.plan);
+  res.json({ received: true });
 });
 
 const upload = multer({

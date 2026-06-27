@@ -26,7 +26,18 @@ export function userCount() { return Object.keys(load()).length; }
 export function putUser(email, passwordHash) {
   const users = load();
   const key = norm(email);
-  users[key] = { email: key, passwordHash, createdAt: new Date().toISOString() };
+  users[key] = { email: key, passwordHash, plan: 'free', createdAt: new Date().toISOString() };
+  save(users);
+  return users[key];
+}
+
+// Update a user's plan (called only from the verified Stripe webhook).
+export function setUserPlan(email, plan) {
+  const users = load();
+  const key = norm(email);
+  if (!users[key]) return null;
+  users[key].plan = plan;
+  users[key].planUpdatedAt = new Date().toISOString();
   save(users);
   return users[key];
 }

@@ -84,6 +84,10 @@ export const githubSchema = {
   url: { type: 'string', required: true, maxLength: 300 }
 };
 
+export const billingSchema = {
+  plan: { type: 'string', required: true, maxLength: 10, enum: ['pro', 'team'] }
+};
+
 export const credentialsSchema = {
   email: { type: 'string', required: true, maxLength: 254, minLength: 3 },
   password: { type: 'string', required: true, maxLength: 200, minLength: 8, trim: false }
