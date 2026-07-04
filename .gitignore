@@ -17,3 +17,8 @@ npm-debug.log*
 
 # Local user store (bcrypt hashes) — never commit
 data/
+
+# Environment / secrets — never commit (keep .env.example as the template)
+.env
+.env.*
+!.env.example

@@ -1,7 +1,5 @@
 # SentryScan — Website Tester
 
-[![Security & Quality CI](https://github.com/arju-singh/Secuityfor_vibecoder/actions/workflows/security.yml/badge.svg)](https://github.com/arju-singh/Secuityfor_vibecoder/actions/workflows/security.yml)
-
 A full-stack web app to test any website across four dimensions — UI health, API behavior, security, and live JavaScript rendering — plus a source-code scanner. Three modes:
 
 1. **Test a website** (URL) — runs four suites and merges the results:
@@ -9,16 +7,9 @@ A full-stack web app to test any website across four dimensions — UI health, A
    - **Security**: HTTPS enforcement, security headers, TLS certificate health, cookie flags, CORS, clickjacking, mixed content, exposed files (`.env`, `.git`, backups, `phpinfo`).
    - **Vulnerabilities & OWASP**: non-destructive vulnerability checks of the class used by baseline DAST tools, each mapped to an OWASP Top 10 (2021) category — see the table below.
    - **Render (JavaScript)**: a real headless Chromium loads the page and captures console errors, uncaught exceptions, failed network requests, and verifies content actually renders after scripts run.
-   - **Quality audits** (optional, on by default): **Performance** (TTFB, compression, caching headers, render-blocking scripts, page weight), **Accessibility/WCAG** (static checks: unlabeled fields, empty links/buttons, pinch-zoom disabled, duplicate IDs, skipped heading levels), and **SEO** (title/description length, canonical, Open Graph, robots meta, robots.txt & sitemap.xml). These are static, read-only audits — no load/stress testing.
-2. **Test an API** (URL) — reachability, status code, response time, JSON validity, content-type, CORS, supported methods (OPTIONS), auth behavior, and HTTPS. Also runs **access-control checks** (OWASP A01): authentication enforcement (compares authenticated vs anonymous responses), an **IDOR heuristic** (are sequential object IDs directly addressable while out-of-range IDs 404?), **401/403 auth-bypass** attempts (spoofed `X-Forwarded-*`/`X-Original-URL` headers and path-normalisation tricks), an opt-in **rate-limit test** (burst of requests, watches for HTTP 429), opt-in **OpenAPI/Swagger endpoint enumeration** (finds the API's spec, maps the documented surface, and flags documented endpoints reachable without auth), and an opt-in, experimental **race-condition probe** (concurrent write requests). These are *signals* to confirm manually — business-logic / workflow-abuse flaws cannot be automated and stay a manual exercise. Optionally **fuzz query parameters** (and, with explicit opt-in, **JSON request-body fields** — including **nested objects and array elements** like `user.roles.0` — via POST/PUT/PATCH/DELETE, plus your own **custom payload list**): each parameter/field is probed with crafted payloads (SQL injection, reflected XSS, path traversal, command injection, server-side template injection, oversized/type-confusion inputs) and the responses are checked for SQL errors, command output, reflected markers, stack traces, and unhandled 500s — each mapped to OWASP A03/A04.
-3. **Scan source code** (upload) — leaked API keys & secrets, private keys, hardcoded passwords, dangerous code patterns (`eval`, `innerHTML`, SQL concatenation, command execution), committed sensitive files, and **known-vulnerable dependencies** checked live against the [OSV.dev](https://osv.dev) advisory database (npm, PyPI, Composer, RubyGems). Plus native static-analysis audits: **code quality** (oversized files, god modules, TODO/empty stubs, **AI-hallucinated/undeclared imports**, `await`-in-`.map()` and other perf anti-patterns), **frontend quality** (missing alt, missing `key`, `useEffect` leaks, unsafe `target="_blank"`), **config/DevOps** (hardcoded localhost, unpinned Docker, TS strict, missing health endpoint), **testing quality** (no tests, empty tests, no assertions), and **project hygiene** (committed `.env`, weak `.gitignore`, missing README/lock file).
-Every report can be **exported as JSON** (the full structured result) or **saved as PDF** (via the browser's print-to-PDF, with a clean print stylesheet). Completed scans are kept in a **History** tab (stored locally in your browser) so you can re-open any past report without re-scanning. Nothing is persisted on the server.
-
+2. **Test an API** (URL) — reachability, status code, response time, JSON validity, content-type, CORS, supported methods (OPTIONS), auth behavior, and HTTPS.
+3. **Scan source code** (upload) — leaked API keys & secrets, private keys, hardcoded passwords, dangerous code patterns (`eval`, `innerHTML`, SQL concatenation, command execution), committed sensitive files, and **known-vulnerable dependencies** checked live against the [OSV.dev](https://osv.dev) advisory database (npm, PyPI, Composer, RubyGems).
 4. **Learn & roadmap** — an in-app reference: the penetration-testing methodology, the full OWASP Top 10 (2021) with what SentryScan automates vs. what to test manually, a security-engineer career roadmap, and curated **legal practice targets** (one click loads them into the testers) plus guided learning paths (OWASP, PortSwigger Web Academy, TryHackMe, Hack The Box).
-
-### Authenticated scanning
-
-Both the Website and API tabs have an optional **Authenticated scan** box. Provide request headers (one per line, e.g. `Authorization: Bearer …` or `Cookie: session=…`) and SentryScan attaches them to **every** request across all suites — including the headless-browser render — so it tests pages and endpoints as a logged-in user. Headers are validated server-side (forbidden headers like `Host`/`Content-Length` are stripped, max 12) and applied per-request via `AsyncLocalStorage`, so they never leak between concurrent scans and are never persisted server-side. Header sets can be **saved as named profiles** (stored locally in your browser via `localStorage`) and re-applied across both tabs.
 
 The Website and API tabs also include **one-click practice presets** (SauceDemo, the-internet, OWASP Juice Shop demo, JSONPlaceholder, Restful-Booker, PetStore, httpbin, …) so you can try it as a tester immediately.
 
@@ -48,42 +39,11 @@ npm run dev
 
 The server listens on `PORT` (default `3000`).
 
-## Continuous Integration
-
-`.github/workflows/security.yml` runs on every push/PR and wires in the real external engines that aren't bundled into the app:
-
-- **Integration test** — SentryScan's own 39-assertion suite (`npm test`)
-- **npm audit** — dependency advisories
-- **Gitleaks** — secret scan across full git history
-- **Trivy** — filesystem vuln + secret + misconfig scan
-- **Semgrep** — SAST with 1000+ community rules (OWASP Top 10, secrets, injections); public rulesets, no token
-- **ESLint** — runs if an ESLint config is present (else skipped)
-- **Lighthouse** — boots the app and audits performance / a11y / SEO / best-practices
-- **SonarCloud (SonarQube)** — deep static analysis (bugs, vulns, hotspots, code smells). **Skips until configured** so CI stays green.
-
-### Enabling SonarCloud
-
-1. Sign in at [sonarcloud.io](https://sonarcloud.io) with GitHub and **add/import this repository** (free for public repos).
-2. Note your **organization** and **project key**, and update `sonar-project.properties` to match.
-3. Generate a token (SonarCloud → My Account → Security) and add it to the repo as a secret named **`SONAR_TOKEN`** (Settings → Secrets and variables → Actions).
-4. Push — the `sonarcloud` job will then run; until the token exists it skips cleanly.
-
-- **SBOM** — Trivy generates a CycloneDX Software Bill of Materials, uploaded as a build artifact.
-
-### AI Code Review (`.github/workflows/ai-review.yml`)
-
-On every pull request, an AI reviewer posts a comment with a **summary, a per-file walkthrough, an optional Mermaid diagram, line-by-line findings, and committable suggestions** (the CodeRabbit/CodeAnt-style review). It uses the Claude API and **no-ops until configured** — add an **`ANTHROPIC_API_KEY`** repo secret to activate it (optionally set `AI_REVIEW_MODEL`, default `claude-sonnet-4-6`). Reviews re-run automatically on each new commit (incremental).
-
-- **Custom rules:** drop an `.ai-review.json` (`guidelines` + `pathInstructions`) and the reviewer enforces your project's conventions.
-- **PR chat / Q&A:** comment `@sentryscan <question>` on a PR and the AI answers about the diff (`ai-chat.yml`).
-
-Scanner steps are non-gating by default (they report); the integration test gates the build. Tighten `exit-code`/`continue-on-error` to make any scanner block merges.
-
 ## How it works
 
 - **Backend** (`server.js` + `src/scanners/`): Express API.
-  - `POST /api/test/website` — `{ "url": "example.com", "render": true, "headers": { "Authorization": "Bearer …" } }` (UI + security + vuln + render; `headers` optional for authenticated scans)
-  - `POST /api/test/api` — `{ "url": "https://api.example.com/endpoint?q=1", "fuzz": true, "headers": { … }, "method": "POST", "body": "{\"user\":\"a\"}", "allowWrite": true }` (`fuzz`, `headers`, and the write-fuzz fields are optional)
+  - `POST /api/test/website` — `{ "url": "example.com", "render": true }` (UI + security + render)
+  - `POST /api/test/api` — `{ "url": "https://api.example.com/endpoint" }`
   - `POST /api/scan/files` — multipart upload (`.zip` or loose files)
 - **Frontend** (`public/`): single-page UI with a score gauge, per-category summary cards, severity + category filters, and per-finding remediation.
 
@@ -92,11 +52,7 @@ Scanner steps are non-gating by default (they report); the integration test gate
 | File | Responsibility |
 |------|----------------|
 | `src/scanners/uiScanner.js` | UI/health: load, broken links/resources, structure, accessibility, forms |
-| `src/scanners/auditScanner.js` | Quality audits: performance, accessibility (WCAG, static), SEO (one fetch → 3 sections) |
 | `src/scanners/apiScanner.js` | API: status, timing, JSON validity, CORS, methods, auth, HTTPS |
-| `src/scanners/apiFuzzScanner.js` | API parameter fuzzing: per-parameter injection payloads + anomaly detection (GET-only) |
-| `src/scanners/accessScanner.js` | Access control (A01): auth enforcement, IDOR, 401/403 bypass, rate-limit, race-condition probe |
-| `src/scanners/apiSpecScanner.js` | OpenAPI/Swagger discovery + documented-endpoint enumeration |
 | `src/scanners/urlScanner.js` | Security: headers, TLS, cookies, CORS, exposed paths, mixed content |
 | `src/scanners/renderScanner.js` | Headless Chromium: console/JS errors, failed requests, render check |
 | `src/scanners/codeScanner.js` | Secret detection, dangerous patterns, sensitive files, OSV dependency lookups |
@@ -121,31 +77,9 @@ The vulnerability suite maps each finding to an OWASP category:
 
 The reflected-input and SQL-error probes only run when the tested URL already contains query parameters, and they send a single benign, non-executing request per technique. They flag *signals* to investigate — confirm manually before remediation sign-off.
 
-## Exploitation stance
-
-Each actionable finding carries a **reproduction PoC** — a copy-paste `curl` command that reproduces the exact request (with your credentials **redacted** to `<your-credential>` so exported reports never leak tokens) — and, for SQL injection, an **authorized hand-off command** (`sqlmap …`) to run yourself within an authorized engagement. The scanner finds and confirms; the human exploits, under their own authorization.
-
-SentryScan **confirms** vulnerabilities but never **weaponises** them. For SQL injection on a GET query parameter it runs a **non-destructive boolean-based confirmation** (a tautology `1=1` vs a contradiction `1=2`); if responses differ reliably, the parameter is *confirmed* injectable — **without reading or modifying any data**. Server-side template injection is confirmed by safe arithmetic (`7*7`→`49`) and open redirects by following the `Location` header. The tool deliberately does **not** extract data, run OS commands (RCE), modify/delete data, or perform DoS — those require explicit, contextual authorization and are left to manual testing.
-
-## Accounts & billing
-
-JWT cookie auth (bcrypt, brute-force lockout) gates optional features; see the auth section in `.env.example`. **Billing** uses **Stripe Checkout** (hosted — card data never touches this server). It activates only when `STRIPE_SECRET_KEY` is set (use **test keys** first); until then the endpoints report "not configured" and the UI prompts sign-in. A signature-verified webhook (`/api/billing/webhook`) is the **only** thing that grants a paid plan — the browser is never trusted to report payment. Configure `STRIPE_PRICE_PRO` / `STRIPE_PRICE_TEAM` and `STRIPE_WEBHOOK_SECRET` to enable.
-
-## Hardening (the server itself)
-
-SentryScan's own API follows OWASP best practices:
-
-- **Rate limiting** (`src/middleware/rateLimit.js`) — sliding-window, per-IP (and per-credential when an `Authorization` header is present). Global `/api` limit plus stricter limits on the expensive scan and file-upload endpoints. Graceful **HTTP 429** with `Retry-After` + `RateLimit-*` headers. Defaults are tunable via `RATE_LIMIT_*` env vars.
-- **Strict input validation** (`src/middleware/validate.js`) — schema-based allowlisting: type checks, length/enum/array limits, applied defaults, and **rejection of any unexpected field** (no mass-assignment surface). Malformed JSON and oversized bodies return clean 400/413s; errors never leak stack traces.
-- **Secure secret handling** — the server holds **no hard-coded keys**; it reads only `PORT` and `SENTRYSCAN_ALLOW_LOCAL` from the environment, and no secret is exposed to the client. Optional integration keys (`ANTHROPIC_API_KEY`, `SONAR_TOKEN`) live only as CI secrets. See `.env.example`; `.env` is gitignored. User-supplied scan credentials are redacted in reproduction output and never persisted.
-- **Secure response headers** (`src/middleware/security.js`) — strict CSP (`script-src 'self'`), `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, COOP/CORP, and HSTS on every response.
-- **Trust-proxy is opt-in** (`TRUST_PROXY`) so `X-Forwarded-For` can't be spoofed to evade rate limits unless you're behind a trusted proxy.
-
 ## Safety & scope
 
-SentryScan is a **non-intrusive** auditor. The URL scanner issues only ordinary `GET` requests — the same a browser makes — and never attempts exploits. **Parameter fuzzing is GET-only by default** and cannot modify server-side data. Fuzzing a **JSON request body** (and using write methods POST/PUT/PATCH/DELETE) is supported but **off unless you explicitly enable "Allow destructive (write) requests"** — those requests can create or modify data, so only enable them on systems you own or are authorized to test. Either way, fuzzing sends many requests; use it responsibly. Scans of `localhost` and private/internal network addresses are blocked (SSRF protection). The code scanner analyzes files in memory and only contacts OSV.dev to check dependency versions. No scan results are persisted.
-
-Scans of `localhost` and private/internal addresses are **blocked by default**. To scan your own local/dev server, start with `SENTRYSCAN_ALLOW_LOCAL=1 npm start` — cloud metadata endpoints (`169.254.169.254`) stay blocked regardless. The behavior is covered by an integration test (`npm test`) that fuzzes a deliberately-vulnerable local server and asserts SQLi, XSS, path-traversal, command-injection, SSTI, and authenticated-scan detection all work with no false positives.
+SentryScan is a **non-intrusive** auditor. The URL scanner issues only ordinary `GET` requests — the same a browser makes — and never attempts exploits. Scans of `localhost` and private/internal network addresses are blocked (SSRF protection). The code scanner analyzes files in memory and only contacts OSV.dev to check dependency versions. No scan results are persisted.
 
 **Only scan websites and code you own or are explicitly authorized to assess.**
 
@@ -169,4 +103,3 @@ Scans of `localhost` and private/internal addresses are **blocked by default**. 
 - `eval`, `Function`, `innerHTML`, `dangerouslySetInnerHTML`, `document.write`, shell exec, SQL concatenation
 - Committed `.env`, `.git`, SSH keys, `.htpasswd`, backup files
 - Known-vulnerable npm / PyPI / Composer / RubyGems dependencies (OSV.dev)
-# Secuityfor_vibecoder
