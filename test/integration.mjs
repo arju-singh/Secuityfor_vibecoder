@@ -9,14 +9,17 @@ import { scanAccess } from '../src/scanners/accessScanner.js';
 import { scanApiSpec } from '../src/scanners/apiSpecScanner.js';
 import { scanAudits } from '../src/scanners/auditScanner.js';
 import { scanCodeAudit } from '../src/scanners/codeAuditScanner.js';
-import { validateBody, websiteSchema, apiSchema, credentialsSchema } from '../src/middleware/validate.js';
+import { validateBody, websiteSchema, apiSchema, credentialsSchema, forgotSchema, resetSchema } from '../src/middleware/validate.js';
 import { rateLimit } from '../src/middleware/rateLimit.js';
 import { hashPassword, verifyPassword, issueToken, verifyToken } from '../src/auth/auth.js';
 import * as bf from '../src/auth/bruteforce.js';
+import { createToken, consumeToken } from '../src/auth/tokens.js';
+import { isEmailConfigured, sendMail } from '../src/email/mailer.js';
+import { isGoogleConfigured } from '../src/auth/oauth.js';
 import { parseRepoUrl, safeExtract } from '../src/scanners/githubScanner.js';
 import AdmZip from 'adm-zip';
-import { isConfigured as billingConfigured, planChangeFromEvent, createCheckoutSession } from '../src/billing/billing.js';
-import { putUser, setUserPlan, getUser } from '../src/auth/store.js';
+import { isConfigured as billingConfigured, planChangeFromEvent, createCheckoutSession, createPortalSession } from '../src/billing/billing.js';
+import { putUser, setUserPlan, getUser, updateUser, findByCustomerId } from '../src/auth/store.js';
 import { runWithAuth, fetchWithTimeout } from '../src/scanners/util.js';
 
 let passed = 0, failed = 0;
@@ -66,7 +69,9 @@ app.get('/search', (req, res) => {
   if (q.includes("'")) return res.status(200).send(`You have an error in your SQL syntax; check near '${q}'`); // SQLi
   if (q.includes('etc/passwd')) return res.send('root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:');             // traversal
   if (/[;|]\s*id/.test(q)) return res.send('uid=33(www-data) gid=33(www-data) groups=33(www-data)');           // cmd injection
-  if (q.includes('7*7')) return res.send('Result: 49');                                                         // SSTI
+  // SSTI: a real vulnerable template engine evaluates the injected arithmetic,
+  // so compute whatever N*M was injected (e.g. ${1234*1234} -> 1522756).
+  { const mm = q.match(/(\d+)\s*\*\s*(\d+)/); if (mm) return res.send(`Result: ${Number(mm[1]) * Number(mm[2])}`); }
   res.set('content-type', 'text/html').send(`<html><body>You searched for: ${q}</body></html>`);                // reflected XSS (unencoded)
 });
 
@@ -337,6 +342,46 @@ try {
   putUser('plan@test.com', 'x');
   setUserPlan('plan@test.com', 'pro');
   assert(getUser('plan@test.com').plan === 'pro', 'webhook plan update persists to the user store');
+  let portalThrew = false;
+  try { await createPortalSession('cus_x', 'http://x'); } catch (e) { portalThrew = e.status === 503; }
+  assert(portalThrew, 'billing portal refuses cleanly (503) when not configured');
+  const chgC = planChangeFromEvent({ type: 'checkout.session.completed', data: { object: { customer: 'cus_42', metadata: { email: 'c@test.com', plan: 'team' } } } });
+  assert(chgC && chgC.customerId === 'cus_42', 'checkout event carries the Stripe customer id');
+
+  // --- 10) Launch features: store, single-use tokens, email/OAuth guards ---
+  console.log('\n[10] Launch features (store / tokens / email / OAuth):');
+  // Store helpers
+  putUser('store@test.com', 'h0');
+  assert(getUser('store@test.com').emailVerified === false, 'putUser defaults emailVerified=false');
+  updateUser('store@test.com', { stripeCustomerId: 'cus_777', emailVerified: true });
+  assert(getUser('store@test.com').emailVerified === true, 'updateUser merges fields');
+  assert(findByCustomerId('cus_777').email === 'store@test.com', 'findByCustomerId locates the user');
+  updateUser('store@test.com', { verifyNonce: 'abc' });
+  updateUser('store@test.com', { verifyNonce: null });
+  assert(!('verifyNonce' in getUser('store@test.com')), 'updateUser(null) clears a field');
+  assert(updateUser('nobody@test.com', { x: 1 }) === null, 'updateUser returns null for unknown user');
+
+  // Single-use scoped tokens (email verification + password reset)
+  putUser('tok@test.com', 'h1');
+  const vTok = createToken('tok@test.com', 'verify');
+  assert(consumeToken('verify', vTok) === 'tok@test.com', 'verify token consumes to the right email');
+  assert(consumeToken('verify', vTok) === null, 'verify token is single-use (second consume fails)');
+  const rTok = createToken('tok@test.com', 'reset');
+  assert(consumeToken('verify', rTok) === null, 'a reset token cannot be used as a verify token (purpose-scoped)');
+  assert(consumeToken('reset', rTok + 'x') === null, 'tampered reset token is rejected');
+  assert(consumeToken('reset', rTok) === 'tok@test.com', 'valid reset token consumes correctly');
+
+  // Validation schemas for the new endpoints
+  assert(validateBody(forgotSchema, {}).ok === false, 'forgot requires an email');
+  assert(validateBody(forgotSchema, { email: 'a@b.com' }).ok === true, 'forgot accepts an email');
+  assert(validateBody(resetSchema, { token: 't' }).ok === false, 'reset requires a password');
+  assert(validateBody(resetSchema, { token: 't', password: 'short' }).ok === false, 'reset rejects passwords under 8 chars');
+  assert(validateBody(resetSchema, { token: 't', password: 'longenough' }).ok === true, 'reset accepts token + valid password');
+
+  // Optional-integration guards (off by default in tests)
+  assert(isEmailConfigured() === false, 'email reports not-configured without RESEND_API_KEY');
+  assert((await sendMail({ to: 'x@y.com', subject: 's', text: 't' })).dev === true, 'sendMail no-ops to dev console when unconfigured');
+  assert(isGoogleConfigured() === false, 'Google OAuth reports not-configured without client id/secret');
 } finally {
   server.close();
 }

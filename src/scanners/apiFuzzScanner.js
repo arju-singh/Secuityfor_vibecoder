@@ -41,10 +41,14 @@ const PAYLOADS = [
     detect: (b) => /uid=\d+\([^)]+\)\s+gid=\d+/.test(b) },
   { id: 'cmd-pipe', value: '|id', tech: 'Command injection', sev: 'critical', owasp: OWASP_A03,
     detect: (b) => /uid=\d+\([^)]+\)\s+gid=\d+/.test(b) },
-  { id: 'ssti-dollar', value: '${7*7}', tech: 'Server-side template injection', sev: 'high', owasp: OWASP_A03,
-    detect: (b) => b.includes('49') && !b.includes('${7*7}') },
-  { id: 'ssti-curly', value: '{{7*7}}', tech: 'Server-side template injection', sev: 'high', owasp: OWASP_A03,
-    detect: (b) => b.includes('49') && !b.includes('{{7*7}}') },
+  // Use a distinctive product (1234*1234 = 1522756) instead of 7*7=49: "49"
+  // occurs constantly in normal responses (prices, sizes, ids), which produced
+  // false high-severity SSTI findings. A 7-digit result matching by chance is
+  // negligible, and we still require the raw payload NOT be reflected verbatim.
+  { id: 'ssti-dollar', value: '${1234*1234}', tech: 'Server-side template injection', sev: 'high', owasp: OWASP_A03,
+    detect: (b) => b.includes('1522756') && !b.includes('1234*1234') },
+  { id: 'ssti-curly', value: '{{1234*1234}}', tech: 'Server-side template injection', sev: 'high', owasp: OWASP_A03,
+    detect: (b) => b.includes('1522756') && !b.includes('1234*1234') },
   { id: 'longstr', value: 'A'.repeat(6000), tech: 'Oversized input', sev: 'low', owasp: OWASP_A04, oversize: true },
   { id: 'type-array', value: '__arr__', arrayName: true, tech: 'Type confusion (array)', sev: 'low', owasp: OWASP_A04, typeJuggle: true }
 ];

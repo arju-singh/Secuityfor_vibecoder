@@ -28,7 +28,7 @@ export async function scanRender(input, opts = {}) {
 
   let browser;
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: true, timeout: 30000 });
   } catch (e) {
     const err = new Error('Chromium browser is not installed. Run: npx playwright install chromium');
     err.code = 'RENDER_UNAVAILABLE';

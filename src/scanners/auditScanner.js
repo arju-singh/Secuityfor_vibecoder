@@ -25,13 +25,13 @@ export async function scanAudits(input) {
   const $ = html ? cheerio.load(html) : null;
   return {
     meta,
-    perf: perfFindings(headers, html, ms, $),
+    perf: perfFindings(headers, html, ms, $, meta.bytes),
     a11y: $ ? a11yFindings($) : [],
     seo: await seoFindings($, u)
   };
 }
 
-function perfFindings(headers, html, ms, $) {
+function perfFindings(headers, html, ms, $, bytes = 0) {
   const f = [];
   if (ms > 3000) f.push(finding('medium', `Slow server response (${ms} ms)`,
     'The server took over 3 seconds to start responding (TTFB), hurting UX and search ranking.',
@@ -50,9 +50,11 @@ function perfFindings(headers, html, ms, $) {
       'No Cache-Control/ETag/Last-Modified, so browsers and proxies cannot cache or validate the response.',
       'Set appropriate Cache-Control / ETag headers.'));
   }
-  if (html.length > 1_000_000) f.push(finding('low', `Large HTML document (${Math.round(html.length / 1024)} KB)`,
+  // Use the true byte count (html is truncated to 1 MB, so html.length can never
+  // exceed the threshold — the check must run against the full response size).
+  if (bytes > 1_000_000) f.push(finding('low', `Large HTML document (${Math.round(bytes / 1024)} KB)`,
     'The HTML payload exceeds 1 MB, slowing first render.',
-    'Reduce inline content and lazy-load below-the-fold sections.', `${Math.round(html.length / 1024)} KB`));
+    'Reduce inline content and lazy-load below-the-fold sections.', `${Math.round(bytes / 1024)} KB`));
 
   if ($) {
     let blocking = 0;

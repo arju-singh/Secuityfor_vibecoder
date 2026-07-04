@@ -278,6 +278,9 @@ export const SCANNABLE_EXT = new Set([
 export function extOf(path) {
   const base = path.split('/').pop() || '';
   const dot = base.lastIndexOf('.');
-  if (dot <= 0) return base.toLowerCase(); // dotfiles like .env -> "env" handled by caller
+  // Dotfile (leading dot, no other): treat the name after the dot as the ext, so
+  // ".env" -> "env" (matches SCANNABLE_EXT, which stores extensions without a dot).
+  if (dot === 0) return base.slice(1).toLowerCase();
+  if (dot < 0) return base.toLowerCase(); // no extension at all
   return base.slice(dot + 1).toLowerCase();
 }

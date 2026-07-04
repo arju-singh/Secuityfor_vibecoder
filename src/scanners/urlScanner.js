@@ -127,10 +127,15 @@ function checkHeaders(headers, isHttps) {
       'Neither X-Frame-Options nor CSP frame-ancestors is set; the page can be framed by attackers.',
       "Add X-Frame-Options: DENY or CSP frame-ancestors 'none'."));
   }
-  if (!get('referrer-policy')) {
+  const refPol = get('referrer-policy');
+  if (!refPol) {
     findings.push(finding('low', 'Missing Referrer-Policy',
       'Full referrer URLs may leak to third parties.',
       'Add: Referrer-Policy: strict-origin-when-cross-origin'));
+  } else if (/(?:^|,)\s*(?:unsafe-url|no-referrer-when-downgrade)\s*(?:,|$)/i.test(refPol)) {
+    findings.push(finding('low', 'Weak Referrer-Policy',
+      `Referrer-Policy is "${refPol}", which leaks the full referrer URL (path and query) to cross-origin destinations.`,
+      'Use a privacy-preserving value such as strict-origin-when-cross-origin or no-referrer.', refPol));
   }
   if (!get('permissions-policy')) {
     findings.push(finding('low', 'Missing Permissions-Policy',
@@ -151,6 +156,15 @@ function checkHeaders(headers, isHttps) {
       `Technology stack disclosed: "${powered}".`,
       'Remove the X-Powered-By header (e.g. app.disable("x-powered-by") in Express).', powered));
   }
+  // Headers that exist only to disclose framework/runtime version info.
+  for (const h of ['x-aspnet-version', 'x-aspnetmvc-version', 'x-runtime']) {
+    const v = get(h);
+    if (v) {
+      findings.push(finding('low', `${h} header discloses framework version`,
+        `The ${h} header reveals "${v}", helping attackers fingerprint the stack and target known CVEs.`,
+        `Remove the ${h} header (e.g. <httpRuntime enableVersionHeader="false"/> for ASP.NET).`, v));
+    }
+  }
 
   // CORS
   const acao = get('access-control-allow-origin');
@@ -169,6 +183,20 @@ function checkHeaders(headers, isHttps) {
   for (const c of setCookie) {
     const name = (c.split('=')[0] || 'cookie').trim();
     const flags = c.toLowerCase();
+    // __Secure-/__Host- prefixes carry browser-enforced guarantees; misuse → cookie rejected.
+    if (/^__Secure-/i.test(name) && !flags.includes('secure')) {
+      findings.push(finding('medium', `Cookie "${name}" uses __Secure- prefix without Secure`,
+        'The __Secure- name prefix requires the Secure attribute; without it browsers reject the cookie.',
+        'Add the Secure attribute, or drop the __Secure- prefix.', c.slice(0, 120)));
+    }
+    if (/^__Host-/i.test(name)) {
+      const cookiePath = (c.match(/;\s*path=([^;]*)/i) || [])[1];
+      if (!flags.includes('secure') || /;\s*domain=/i.test(c) || (cookiePath && cookiePath.trim() !== '/')) {
+        findings.push(finding('medium', `Cookie "${name}" violates __Host- prefix rules`,
+          'The __Host- prefix requires Secure and Path=/ with no Domain attribute; otherwise browsers reject the cookie.',
+          'Set Secure and Path=/ and remove any Domain attribute, or drop the __Host- prefix.', c.slice(0, 120)));
+      }
+    }
     const missing = [];
     if (isHttps && !flags.includes('secure')) missing.push('Secure');
     if (!flags.includes('httponly')) missing.push('HttpOnly');
@@ -185,6 +213,15 @@ function checkHeaders(headers, isHttps) {
         'Cookies without these flags are exposed to theft via XSS, interception, or CSRF.',
         `Set the ${missing.join(', ')} attribute(s) on this cookie.`, c.slice(0, 120)));
     }
+  }
+
+  // Responses that set an auth/session cookie must not be cached by proxies or the bfcache.
+  const authCookie = setCookie.some((c) => /(?:sess|session|token|jwt|auth|csrf)/i.test((c.split('=')[0] || '')));
+  const cacheControl = (get('cache-control') || '').toLowerCase();
+  if (authCookie && !/(?:no-store|private)/.test(cacheControl)) {
+    findings.push(finding('medium', 'Sensitive response is cacheable',
+      'The response sets a session/authentication cookie but Cache-Control does not include no-store or private, so proxies or the browser back/forward cache may retain authenticated content.',
+      'Send Cache-Control: no-store (or at least private, no-cache) on authenticated/sensitive responses.', get('cache-control') || 'unset'));
   }
   return findings;
 }

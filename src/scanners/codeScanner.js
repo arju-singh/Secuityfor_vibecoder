@@ -10,6 +10,22 @@ function finding(severity, title, description, remediation, evidence, location) 
   return { severity, title, description, remediation, evidence: evidence || null, location: location || null };
 }
 
+// Restrict a set of { path } entries to one or more directory/path prefixes so a
+// scan can target the modules that matter (large-monorepo scoping). Prefixes are
+// matched case-insensitively against the normalized path; a bare prefix matches
+// both the directory ("src/auth") and files directly named by it. Empty/omitted
+// prefixes return every entry unchanged.
+export function scopeEntries(entries, paths) {
+  const prefixes = (paths || [])
+    .map((p) => String(p || '').trim().replace(/^\.?\/+/, '').replace(/\/+$/, '').toLowerCase())
+    .filter(Boolean);
+  if (!prefixes.length) return entries;
+  return entries.filter((e) => {
+    const p = String(e.path || '').toLowerCase();
+    return prefixes.some((pre) => p === pre || p.startsWith(pre + '/'));
+  });
+}
+
 function lineOfIndex(content, index) {
   let line = 1;
   for (let i = 0; i < index && i < content.length; i++) {
@@ -194,27 +210,60 @@ async function queryOsv(deps) {
   return { findings, checked: deps.length };
 }
 
+// Compute a CVSS v3.0/3.1 base score from its vector string (per the FIRST spec),
+// returning a 0–10 number or null if the vector can't be parsed. Deterministic —
+// no rounding surprises beyond the spec's round-up-to-one-decimal.
+function cvssV3BaseScore(vector) {
+  const m = {};
+  for (const part of String(vector).split('/')) {
+    const [k, v] = part.split(':');
+    if (k && v) m[k] = v;
+  }
+  const AV = { N: 0.85, A: 0.62, L: 0.55, P: 0.2 }[m.AV];
+  const AC = { L: 0.77, H: 0.44 }[m.AC];
+  const UI = { N: 0.85, R: 0.62 }[m.UI];
+  const changed = m.S === 'C';
+  const PR = (changed ? { N: 0.85, L: 0.68, H: 0.5 } : { N: 0.85, L: 0.62, H: 0.27 })[m.PR];
+  const cia = { H: 0.56, L: 0.22, N: 0 };
+  const C = cia[m.C], I = cia[m.I], A = cia[m.A];
+  if ([AV, AC, UI, PR, C, I, A].some((x) => x === undefined)) return null;
+
+  const iss = 1 - (1 - C) * (1 - I) * (1 - A);
+  const impact = changed
+    ? 7.52 * (iss - 0.029) - 3.25 * Math.pow(iss - 0.02, 15)
+    : 6.42 * iss;
+  if (impact <= 0) return 0;
+  const exploitability = 8.22 * AV * AC * PR * UI;
+  const roundup = (x) => Math.ceil(x * 10) / 10;
+  const raw = changed ? 1.08 * (impact + exploitability) : impact + exploitability;
+  return roundup(Math.min(raw, 10));
+}
+
+function severityForScore(score) {
+  if (score >= 9) return 'critical';
+  if (score >= 7) return 'high';
+  if (score >= 4) return 'medium';
+  if (score > 0) return 'low';
+  return 'info';
+}
+
 function osvSeverity(vuln) {
-  // Prefer CVSS score if present.
   const sevArr = vuln.severity || [];
+  // Prefer an actual CVSS base score parsed from the vector.
   for (const s of sevArr) {
-    if (typeof s.score === 'string') {
-      const m = s.score.match(/\/A:[NLH]/) ? null : null; // placeholder, parse base score below
+    if (typeof s.score === 'string' && /^CVSS:3/.test(s.score)) {
+      const score = cvssV3BaseScore(s.score);
+      if (score != null) return severityForScore(score);
     }
   }
   // Database-specific severity (GHSA) often in ecosystem_specific or database_specific.
   const ds = vuln.database_specific && vuln.database_specific.severity;
   if (ds) {
-    const map = { CRITICAL: 'critical', HIGH: 'high', MODERATE: 'medium', LOW: 'low' };
+    const map = { CRITICAL: 'critical', HIGH: 'high', MODERATE: 'medium', MEDIUM: 'medium', LOW: 'low' };
     if (map[String(ds).toUpperCase()]) return map[String(ds).toUpperCase()];
   }
-  // CVSS vector base score heuristic
-  for (const s of sevArr) {
-    if (typeof s.score === 'string' && s.score.startsWith('CVSS')) {
-      // We cannot fully parse CVSS here; treat presence as high.
-      return 'high';
-    }
-  }
+  // A CVSS vector we couldn't parse (e.g. v2) still signals a real advisory.
+  if (sevArr.some((s) => typeof s.score === 'string' && s.score.startsWith('CVSS'))) return 'high';
   return 'medium';
 }
 

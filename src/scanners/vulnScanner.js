@@ -8,7 +8,28 @@
 // systems you own or are authorized to assess.
 import * as cheerio from 'cheerio';
 import { URL } from 'node:url';
+import http from 'node:http';
+import https from 'node:https';
 import { finding, fetchWithTimeout, normalizeUrl } from './util.js';
+
+// Raw HTTP request for methods WHATWG `fetch` forbids (TRACE, TRACK, ...). Node's
+// fetch throws `'TRACE' HTTP method is unsupported`, so the TRACE probe has to go
+// through the low-level http(s) client. Resolves to { status, body } or rejects.
+function rawRequest(rawUrl, method, timeout = 7000) {
+  return new Promise((resolve, reject) => {
+    let u;
+    try { u = new URL(rawUrl); } catch (e) { return reject(e); }
+    const lib = u.protocol === 'https:' ? https : http;
+    const req = lib.request(u, { method, timeout, headers: { 'User-Agent': 'SentryScan/2.0 (+website-tester)' } }, (res) => {
+      let body = '';
+      res.on('data', (c) => { if (body.length < 8192) body += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body }));
+    });
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', reject);
+    req.end();
+  });
+}
 
 const OWASP = {
   A01: 'A01:2021 Broken Access Control',
@@ -53,7 +74,12 @@ const SQL_ERRORS = [
 
 function abs(base, href) { try { return new URL(href, base).href; } catch { return null; } }
 
-export async function scanVuln(input) {
+// opts.effort: 'extended' (default) runs the full probe set including the
+// extra-request probes (open redirect, injection, dev endpoints, GraphQL, …);
+// 'regular' runs only the checks derived from the single landing-page fetch,
+// for fast, low-traffic incremental re-scans.
+export async function scanVuln(input, opts = {}) {
+  const extended = opts.effort !== 'regular';
   const u = normalizeUrl(input);
   const origin = u.origin;
   const findings = [];
@@ -134,6 +160,16 @@ export async function scanVuln(input) {
     findings.push(finding('info', 'Missing X-Permitted-Cross-Domain-Policies',
       'Adobe cross-domain policy controls are not set.',
       'Add X-Permitted-Cross-Domain-Policies: none.', null, null, OWASP.A05));
+  }
+  if (!headers.get('cross-origin-embedder-policy')) {
+    findings.push(finding('info', 'Missing Cross-Origin-Embedder-Policy',
+      'COEP, together with COOP, enables cross-origin isolation that mitigates Spectre-style and XS-Leak attacks.',
+      'Consider Cross-Origin-Embedder-Policy: require-corp (once subresources send CORP/CORS).', null, null, OWASP.A05));
+  }
+  if (!headers.get('cross-origin-resource-policy')) {
+    findings.push(finding('info', 'Missing Cross-Origin-Resource-Policy',
+      'CORP lets the server declare which origins may embed a resource, blocking some cross-origin leak/side-channel attacks.',
+      'Consider Cross-Origin-Resource-Policy: same-origin (or same-site) on sensitive resources.', null, null, OWASP.A05));
   }
 
   // ---- 4) Subresource Integrity (A08) ------------------------------------
@@ -225,20 +261,25 @@ export async function scanVuln(input) {
   }
 
   // ---- 10) Probes that need extra requests (run in parallel) -------------
-  const probes = await Promise.allSettled([
-    probeSecurityTxt(origin),
-    probeTrace(finalUrl),
-    probeCorsReflection(finalUrl),
-    probeDirListing(origin),
-    probeInjection(u),
-    probeOpenRedirect(u),
-    probeHttpMethods(finalUrl),
-    probeDevEndpoints(origin),
-    probeGraphql(origin)
-  ]);
-  for (const p of probes) {
-    if (p.status === 'fulfilled' && p.value) findings.push(...p.value);
+  // Skipped on 'regular' effort — these are the bulk of the scanner's outbound
+  // traffic; 'extended' is the deep-dive that runs them all.
+  if (extended) {
+    const probes = await Promise.allSettled([
+      probeSecurityTxt(origin),
+      probeTrace(finalUrl),
+      probeCorsReflection(finalUrl),
+      probeDirListing(origin),
+      probeInjection(u),
+      probeOpenRedirect(u),
+      probeHttpMethods(finalUrl),
+      probeDevEndpoints(origin),
+      probeGraphql(origin)
+    ]);
+    for (const p of probes) {
+      if (p.status === 'fulfilled' && p.value) findings.push(...p.value);
+    }
   }
+  meta.effort = extended ? 'extended' : 'regular';
 
   return { type: 'vuln', meta, findings };
 }
@@ -296,6 +337,9 @@ function cmpVer(a, b) {
 async function probeSecurityTxt(origin) {
   try {
     const res = await fetchWithTimeout(origin + '/.well-known/security.txt', { method: 'GET', timeout: 7000, redirect: 'manual' });
+    // A 3xx means the file exists but is served from a canonical location — treat
+    // it as present. Only a genuine 4xx/5xx (or absence) is "missing".
+    if (res.status >= 300 && res.status < 400) return [];
     if (res.status !== 200) {
       return [finding('info', 'No security.txt found',
         'There is no /.well-known/security.txt for coordinated vulnerability disclosure (RFC 9116).',
@@ -308,16 +352,15 @@ async function probeSecurityTxt(origin) {
 // ---- Probe: HTTP TRACE (Cross-Site Tracing) ------------------------------
 async function probeTrace(url) {
   try {
-    const res = await fetchWithTimeout(url, { method: 'TRACE', timeout: 7000, redirect: 'manual' });
-    if (res.status === 200) {
-      const body = await res.text().catch(() => '');
-      if (/TRACE\s|via:|x-forwarded/i.test(body) || res.status === 200) {
-        return [finding('medium', 'HTTP TRACE method enabled',
-          'The server responds to TRACE, enabling Cross-Site Tracing (XST) which can expose headers/cookies.',
-          'Disable the TRACE method at the web server.', `HTTP ${res.status}`, null, OWASP.A05)];
-      }
+    // fetch() cannot send TRACE — use the raw client. A 200 that echoes the
+    // request (the TRACE method reflects headers back) confirms XST is possible.
+    const res = await rawRequest(url, 'TRACE', 7000);
+    if (res.status === 200 && /TRACE\s|via:|x-forwarded|user-agent/i.test(res.body)) {
+      return [finding('medium', 'HTTP TRACE method enabled',
+        'The server responds to TRACE and echoes the request, enabling Cross-Site Tracing (XST) which can expose headers/cookies.',
+        'Disable the TRACE method at the web server.', `HTTP ${res.status}`, null, OWASP.A05)];
     }
-  } catch { /* method blocked - good */ }
+  } catch { /* method blocked / connection refused - good */ }
   return [];
 }
 
@@ -382,7 +425,8 @@ async function probeInjection(u) {
       out.push(finding(sev, `Reflected input in response (param "${target}")`,
         'A value supplied in the URL is reflected back in the page. If it is not properly output-encoded, this is a reflected-XSS vector.',
         'Context-aware output-encode all user input and apply a strict CSP.',
-        `param=${target}`, null, OWASP.A03));
+        `param=${target}`, null, OWASP.A03,
+        { confidence: htmlContext.test(body) ? 'medium' : 'low' }));
     }
   } catch { /* ignore */ }
 
@@ -396,7 +440,7 @@ async function probeInjection(u) {
       out.push(finding('high', `Possible SQL injection (param "${target}")`,
         'Appending a single quote to a parameter triggered a database error message, indicating unsanitized input reaching SQL.',
         'Use parameterized queries / prepared statements and validate input. Verify manually before remediation sign-off.',
-        `param=${target}`, null, OWASP.A03));
+        `param=${target}`, null, OWASP.A03, { confidence: 'medium' }));
     }
   } catch { /* ignore */ }
 

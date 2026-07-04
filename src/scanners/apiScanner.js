@@ -81,6 +81,11 @@ export async function scanApi(input) {
       'Responses may be MIME-sniffed by browsers.',
       'Add X-Content-Type-Options: nosniff.'));
   }
+  if (isHttps && !res.headers.get('strict-transport-security')) {
+    findings.push(finding('medium', 'Missing HSTS header',
+      'The API is served over HTTPS but sends no Strict-Transport-Security header, so a client’s first request can be downgraded to HTTP and tokens intercepted.',
+      'Add Strict-Transport-Security: max-age=31536000; includeSubDomains.', 'unset'));
+  }
   const acao = res.headers.get('access-control-allow-origin');
   meta.cors = acao || 'none';
   if (acao === '*' && res.headers.get('access-control-allow-credentials') === 'true') {
