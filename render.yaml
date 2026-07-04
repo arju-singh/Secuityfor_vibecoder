@@ -1,0 +1,65 @@
+# Render Blueprint — deploy SentryScan with one click.
+# In the Render dashboard: New → Blueprint → connect this repo. Render reads this
+# file, builds the Dockerfile, and provisions the service + persistent disk.
+# You only need to fill the `sync: false` secrets (shown as prompts) in the UI.
+#
+# Auto-deploy: every push to `main` redeploys automatically once connected.
+services:
+  - type: web
+    name: sentryscan
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter            # a persistent disk requires a paid instance (not free)
+    region: oregon           # change to your nearest region
+    healthCheckPath: /       # the app serves index.html (200) at /
+    autoDeploy: true
+    # Accounts + scan history live in /app/data as JSON files. The disk keeps
+    # them across redeploys. (For real scale, swap src/auth/store.js etc. for a DB.)
+    disk:
+      name: sentryscan-data
+      mountPath: /app/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Signing key for the auth cookie. Render generates a strong value once and
+      # keeps it stable across deploys (so sessions survive redeploys).
+      - key: JWT_SECRET
+        generateValue: true
+      # Scanning requires an account by default; keep SSRF protection on in prod.
+      - key: REQUIRE_AUTH
+        value: "1"
+      - key: SENTRYSCAN_ALLOW_LOCAL
+        value: "0"
+      # Behind Render's proxy — trust it so client IPs (rate limiting) are correct.
+      - key: TRUST_PROXY
+        value: "true"
+      # Set your deployed URL after the first deploy (used in email links, OAuth
+      # redirects, etc.). e.g. https://sentryscan.onrender.com
+      - key: APP_URL
+        sync: false
+
+      # ---- Optional integrations — leave blank to keep them disabled ----------
+      # Stripe billing (test keys until you go live):
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_PRO
+        sync: false
+      - key: STRIPE_PRICE_TEAM
+        sync: false
+      # Transactional email (verification / password reset):
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      # Google OAuth sign-in:
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      # Scheduled scans (cron): set a shared secret to enable the /api/schedule/run
+      # endpoint, then point a Render Cron Job at it.
+      - key: SCHEDULER_TOKEN
+        sync: false
