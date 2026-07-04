@@ -37,6 +37,17 @@ export function verifyToken(token) {
   catch { return null; }
 }
 
+// Short-lived, purpose-scoped tokens (email verification, password reset, OAuth
+// state). Signed with the same secret but carry a `purpose` so a session token
+// can never be replayed as a reset token and vice-versa.
+export function signScoped(payload, ttlSeconds) {
+  return jwt.sign(payload, SECRET, { expiresIn: ttlSeconds, algorithm: 'HS256' });
+}
+export function verifyScoped(token) {
+  try { return jwt.verify(token, SECRET, { algorithms: ['HS256'] }); }
+  catch { return null; }
+}
+
 export function setAuthCookie(req, res, token) {
   res.cookie(COOKIE_NAME, token, {
     httpOnly: true,

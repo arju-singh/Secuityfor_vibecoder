@@ -23,12 +23,40 @@ export function getUser(email) { return load()[norm(email)] || null; }
 export function hasUser(email) { return !!load()[norm(email)]; }
 export function userCount() { return Object.keys(load()).length; }
 
-export function putUser(email, passwordHash) {
+export function putUser(email, passwordHash, extra = {}) {
   const users = load();
   const key = norm(email);
-  users[key] = { email: key, passwordHash, plan: 'free', createdAt: new Date().toISOString() };
+  users[key] = {
+    email: key,
+    passwordHash,
+    plan: 'free',
+    emailVerified: false,
+    provider: 'password',
+    createdAt: new Date().toISOString(),
+    ...extra
+  };
   save(users);
   return users[key];
+}
+
+// Merge `patch` into an existing user. Keys set to null are removed (used to
+// clear single-use token nonces). Returns the updated record, or null if absent.
+export function updateUser(email, patch) {
+  const users = load();
+  const key = norm(email);
+  if (!users[key]) return null;
+  Object.assign(users[key], patch);
+  for (const k of Object.keys(patch)) if (patch[k] === null) delete users[key][k];
+  save(users);
+  return users[key];
+}
+
+// Look up a user by their Stripe customer id (used by the billing webhook when an
+// event carries the customer but not the email, e.g. subscription cancellation).
+export function findByCustomerId(customerId) {
+  if (!customerId) return null;
+  const users = load();
+  return Object.values(users).find((u) => u.stripeCustomerId === customerId) || null;
 }
 
 // Update a user's plan (called only from the verified Stripe webhook).

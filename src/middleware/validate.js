@@ -73,15 +73,30 @@ export function validate(schema) {
 // ---- Endpoint schemas ------------------------------------------------------
 const URL_MAX = 2048;
 
+// Scan effort: 'extended' is the full deep-dive (current behaviour, kept as the
+// default so coverage never silently drops); 'regular' skips the slower
+// extra-request probes and heavier audits for fast incremental re-scans.
+const EFFORT = { type: 'string', default: 'extended', maxLength: 10, enum: ['regular', 'extended'] };
+// Directory scoping: path prefixes to restrict a code scan to (large-monorepo
+// friendly). Empty/omitted = whole tree.
+const PATHS = { type: 'string[]', maxItems: 50, maxItemLength: 400 };
+// Project a scan is filed under on the user's dashboard.
+const PROJECT = { type: 'string', maxLength: 60 };
+
 export const websiteSchema = {
   url: { type: 'string', required: true, maxLength: URL_MAX },
   render: { type: 'boolean', default: true },
   audits: { type: 'boolean', default: true },
+  effort: EFFORT,
+  project: PROJECT,
   headers: { type: 'headers' }
 };
 
 export const githubSchema = {
-  url: { type: 'string', required: true, maxLength: 300 }
+  url: { type: 'string', required: true, maxLength: 300 },
+  effort: EFFORT,
+  paths: PATHS,
+  project: PROJECT
 };
 
 export const billingSchema = {
@@ -93,9 +108,19 @@ export const credentialsSchema = {
   password: { type: 'string', required: true, maxLength: 200, minLength: 8, trim: false }
 };
 
+export const forgotSchema = {
+  email: { type: 'string', required: true, maxLength: 254, minLength: 3 }
+};
+
+export const resetSchema = {
+  token: { type: 'string', required: true, maxLength: 1000, trim: false },
+  password: { type: 'string', required: true, maxLength: 200, minLength: 8, trim: false }
+};
+
 export const apiSchema = {
   url: { type: 'string', required: true, maxLength: URL_MAX },
   headers: { type: 'headers' },
+  project: PROJECT,
   fuzz: { type: 'boolean', default: false },
   access: { type: 'boolean', default: true },
   enumerate: { type: 'boolean', default: false },
