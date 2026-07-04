@@ -5,6 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="description" content="SentryScan — a premium, non-intrusive security scanner for any website, API, or codebase. UI · API · security · render testing with OWASP-mapped findings." />
   <meta name="theme-color" content="#05070e" />
+
+  <!-- Canonical -->
+  <link rel="canonical" href="https://YOUR-DOMAIN.example/" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="SentryScan — Premium Web Security Scanner" />
+  <meta property="og:description" content="SentryScan — a premium, non-intrusive security scanner for any website, API, or codebase. UI · API · security · render testing with OWASP-mapped findings." />
+  <meta property="og:url" content="https://YOUR-DOMAIN.example/" />
+  <meta property="og:image" content="https://YOUR-DOMAIN.example/favicon.svg" />
+  <meta property="og:site_name" content="SentryScan" />
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="SentryScan — Premium Web Security Scanner" />
+  <meta name="twitter:description" content="SentryScan — a premium, non-intrusive security scanner for any website, API, or codebase. UI · API · security · render testing with OWASP-mapped findings." />
+
+  <!-- Google Search Console: paste <meta name="google-site-verification" ...> here -->
   <title>SentryScan — Premium Web Security Scanner</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <link rel="mask-icon" href="favicon.svg" color="#5b8bff" />
@@ -47,7 +65,7 @@
     </nav>
     <button class="nav-toggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="primary-nav"><span></span><span></span><span></span></button>
     <button class="nav-signin" id="nav-signin" type="button">Sign in</button>
-    <span class="nav-account" id="nav-account" hidden><span id="nav-email"></span> · <button type="button" class="link-btn" id="nav-logout">Log out</button></span>
+    <span class="nav-account" id="nav-account" hidden><span id="nav-email"></span> · <button type="button" class="link-btn" id="nav-billing" hidden>Manage subscription</button> · <button type="button" class="link-btn" id="nav-logout">Log out</button></span>
     <a class="nav-cta" href="#scanner">Run a scan</a>
   </header>
 
@@ -63,7 +81,14 @@
         <input type="password" id="auth-password" placeholder="Password (min 8 characters)" autocomplete="current-password" minlength="8" required />
         <button type="submit" class="primary-cta auth-submit" id="auth-submit">Sign in</button>
       </form>
+      <p class="auth-forgot-row"><button type="button" class="link-btn" id="auth-forgot">Forgot password?</button></p>
+      <div class="auth-or" id="auth-or" hidden><span>or</span></div>
+      <button type="button" class="secondary-cta auth-google" id="auth-google" hidden>
+        <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 4.1 29.6 2 24 2 11.8 2 2 11.8 2 24s9.8 22 22 22 22-9.8 22-22c0-1.3-.1-2.3-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 4.1 29.6 2 24 2 16.3 2 9.7 6.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 46c5.5 0 10.4-2.1 14.1-5.5l-6.5-5.5C29.6 36.8 26.9 38 24 38c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 41.6 16.2 46 24 46z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.1-4.1 5.5l6.5 5.5C41.9 35.5 46 30.3 46 24c0-1.3-.1-2.3-.4-3.5z"/></svg>
+        Continue with Google
+      </button>
       <p class="auth-err" id="auth-err" hidden></p>
+      <p class="auth-note" id="auth-note" hidden></p>
       <p class="auth-switch" id="auth-switch">New here? <button type="button" class="link-btn" id="auth-toggle">Create an account</button></p>
     </div>
   </div>
@@ -227,7 +252,9 @@
         <button class="tab" data-tab="api" role="tab"><span class="tab-ico" aria-hidden="true">🔌</span> API</button>
         <button class="tab" data-tab="code" role="tab"><span class="tab-ico" aria-hidden="true">📦</span> Source code</button>
         <button class="tab" data-tab="learn" role="tab"><span class="tab-ico" aria-hidden="true">🎓</span> Learn</button>
+        <button class="tab" data-tab="projects" role="tab"><span class="tab-ico" aria-hidden="true">📊</span> Projects</button>
         <button class="tab" data-tab="history" role="tab"><span class="tab-ico" aria-hidden="true">🕘</span> History</button>
+        <button class="tab" data-tab="schedules" role="tab"><span class="tab-ico" aria-hidden="true">⏰</span> Schedules</button>
       </div>
 
       <!-- Website panel -->
@@ -246,6 +273,13 @@
           <summary>⚙ Scan options</summary>
           <label class="check"><input type="checkbox" id="render-toggle" checked /> Include live JavaScript / render test (headless browser)</label>
           <label class="check"><input type="checkbox" id="audits-toggle" checked /> Include quality audits (performance · accessibility · SEO)</label>
+          <label class="opt-select">Effort
+            <select id="website-effort">
+              <option value="extended" selected>Extended — full deep-dive (all probes)</option>
+              <option value="regular">Regular — fast, core checks only</option>
+            </select>
+          </label>
+          <p class="hint" style="margin-top:0">Use <strong>Extended</strong> for the first scan; <strong>Regular</strong> is a lighter, low-traffic pass for incremental re-scans (skips the extra-request vulnerability probes).</p>
           <p class="hint">Runs four suites: <strong>UI health</strong> (load, broken links/resources, titles, forms, accessibility) · <strong>Security</strong> (headers, TLS, cookies, exposed files) · <strong>Vulnerabilities &amp; OWASP</strong> (CSP/SRI weaknesses, outdated libraries, TRACE/XST, CORS reflection, open redirect, unsafe HTTP methods, exposed dev/debug endpoints, GraphQL introspection, directory listing, data exposure, reflected-input &amp; SQL-error probes — mapped to the OWASP Top 10) · <strong>Render</strong> (JS console errors, failed requests, blank-page detection).</p>
         </details>
         <details class="auth-box">
@@ -317,6 +351,18 @@
       <section class="panel" id="panel-code">
         <h2 class="panel-title">Scan source code</h2>
         <p class="panel-lead">Drop a build or repo to surface leaked secrets, dangerous patterns, and vulnerable dependencies.</p>
+
+        <div class="privacy-note" id="code-privacy">
+          <span class="privacy-ico" aria-hidden="true">🔒</span>
+          <div class="privacy-copy">
+            <strong>Your data is safe.</strong> Uploaded and pasted code is analyzed <strong>in memory and never written to disk</strong> — the files are discarded the moment the scan finishes. Detected secrets are <strong>masked</strong> before anything is saved, and your code is <strong>never shared with third parties or AI</strong>. Only the findings report (with a short snippet around each flagged line) is stored to your account, and you can delete it anytime. <a href="/privacy.html" target="_blank" rel="noopener">Read the Privacy Policy →</a>
+          </div>
+        </div>
+        <label class="consent-row">
+          <input type="checkbox" id="code-consent" />
+          <span>I understand how my code is handled and I have the right to scan it. We'll check it for leaked secrets, injection &amp; other vulnerabilities, exposed files, and known-vulnerable dependencies.</span>
+        </label>
+
         <div id="dropzone" class="dropzone">
           <input type="file" id="file-input" multiple hidden />
           <span class="drop-ico" aria-hidden="true">
@@ -331,13 +377,27 @@
         </div>
         <button id="code-btn" class="primary-btn" disabled>Analyze code</button>
 
+        <details class="opt-box" id="code-opts">
+          <summary>⚙ Scan options (effort &amp; directory scope)</summary>
+          <label class="opt-select">Effort
+            <select id="code-effort">
+              <option value="extended" selected>Extended — full deep-dive (secrets + all audits)</option>
+              <option value="regular">Regular — fast, core secret &amp; dependency scan only</option>
+            </select>
+          </label>
+          <label class="opt-field">Scope to paths <span class="hint">(optional — one prefix per line, e.g. <code>src/auth</code>. Blank = whole tree)</span>
+            <textarea id="code-paths" class="auth-input" rows="2" spellcheck="false" placeholder="src/auth&#10;src/billing"></textarea>
+          </label>
+          <p class="hint" style="margin-top:0">Scope large monorepos to the modules that matter (auth, payments, API) so scans stay fast and don't time out. Applies to uploads and GitHub-repo scans.</p>
+        </details>
+
         <div class="gh-block">
           <div class="paste-divider"><span>or scan a GitHub repo</span></div>
           <form id="gh-form" class="url-form">
             <input type="text" id="gh-input" placeholder="https://github.com/owner/repo" autocomplete="off" spellcheck="false" />
             <button type="submit">Scan repo</button>
           </form>
-          <p class="auth-hint" style="margin-top:8px">Public repos. The archive is downloaded (size-capped) and analyzed as text — nothing is executed. Host is locked to github.com (SSRF-safe).</p>
+          <p class="auth-hint" style="margin-top:8px">Public repos. The archive is downloaded (size-capped) and analyzed as text — nothing is executed. Host is locked to github.com (SSRF-safe). The effort &amp; path-scope options above apply here too.</p>
         </div>
 
         <div class="paste-block">
@@ -371,6 +431,16 @@
           <h3 class="learn-h">🧭 Penetration-testing methodology</h3>
           <ol class="method-list" id="method-list"></ol>
 
+          <h3 class="learn-h">🏷 How findings are rated — severity &amp; confidence</h3>
+          <p class="auth-hint">Every finding carries a <strong>severity</strong> (how exploitable it is in a default deployment) and a <strong>confidence</strong> (how sure we are it's real, not a false positive). Hover a badge in a report to see its definition.</p>
+          <div class="sev-defs">
+            <div class="sev-def"><span class="f-sev critical">critical</span><p>Directly exploitable by an unauthenticated remote attacker with no meaningful preconditions, leading to compromise of data or the system.</p></div>
+            <div class="sev-def"><span class="f-sev high">high</span><p>Exploitable by an unauthenticated remote attacker against a default deployment, with no meaningful preconditions.</p></div>
+            <div class="sev-def"><span class="f-sev medium">medium</span><p>Exploitable behind authentication, or needs 1–2 realistic preconditions like a specific role or user interaction.</p></div>
+            <div class="sev-def"><span class="f-sev low">low</span><p>Needs 3+ preconditions, local-only access, or lacks a concrete demonstrated attack path.</p></div>
+            <div class="sev-def"><span class="f-sev info">info</span><p>Informational — no direct attack path; recorded for defense-in-depth and reconnaissance awareness.</p></div>
+          </div>
+
           <h3 class="learn-h">🔓 Business logic &amp; workflow abuse — manual playbook</h3>
           <p class="auth-hint">These flaws can't be scanned automatically (they require understanding what the app is <em>supposed</em> to do). Work through these steps by hand:</p>
           <ol class="method-list" id="bizlogic-list"></ol>
@@ -395,13 +465,92 @@
         </div>
       </section>
 
+      <!-- Projects dashboard panel -->
+      <section class="panel" id="panel-projects">
+        <div class="history-head">
+          <p class="hint" style="margin:0">Everything your account knows about each project — saved scans, score trend, in-project schedules, and the current open findings. Synced to your account, not just this browser.</p>
+          <button type="button" id="proj-refresh" class="action-btn">↻ Refresh</button>
+        </div>
+        <div id="proj-gate" class="hint hidden">Sign in to see your saved projects and scans.</div>
+        <div id="proj-list" class="proj-list"></div>
+        <div id="proj-detail" class="proj-detail hidden"></div>
+      </section>
+
       <!-- History panel -->
       <section class="panel" id="panel-history">
         <div class="history-head">
           <p class="hint" style="margin:0">Your recent scans (stored locally in this browser). Click one to view its report again — no re-scan needed.</p>
           <button type="button" id="clear-history" class="action-btn">Clear history</button>
         </div>
+        <div class="project-bar">
+          <label class="opt-select">Project
+            <input type="text" id="project-input" list="project-list" placeholder="Default" autocomplete="off" spellcheck="false" />
+            <datalist id="project-list"></datalist>
+          </label>
+          <span class="hint">New scans are filed under this project so findings stay attributable. Pick one to filter the list below; type a new name to create one.</span>
+        </div>
         <div id="history-list" class="history-list"></div>
+      </section>
+
+      <!-- Schedules panel -->
+      <section class="panel" id="panel-schedules">
+        <div class="history-head">
+          <p class="hint" style="margin:0">Recurring scans that run on a cadence and push each report to a webhook. Ideal cadence: <strong>weekly</strong>, tied to a triage meeting or sprint boundary. Only website / API / GitHub targets (uploads can't be scheduled).</p>
+          <button type="button" id="sched-refresh" class="action-btn">↻ Refresh</button>
+        </div>
+
+        <div id="sched-gate" class="hint hidden">Sign in to create and manage scheduled scans.</div>
+
+        <div id="sched-ui" class="hidden">
+          <form id="sched-form" class="sched-form">
+            <div class="sched-grid">
+              <label class="opt-field">Name
+                <input type="text" id="sched-name" placeholder="Nightly acme.com" autocomplete="off" />
+              </label>
+              <label class="opt-field">Type
+                <select id="sched-type">
+                  <option value="website">Website</option>
+                  <option value="api">API</option>
+                  <option value="github">GitHub repo</option>
+                </select>
+              </label>
+              <label class="opt-field">Target URL
+                <input type="text" id="sched-target" placeholder="https://acme.com  ·  https://github.com/owner/repo" autocomplete="off" spellcheck="false" />
+              </label>
+              <label class="opt-field">Cadence
+                <select id="sched-cadence">
+                  <option value="weekly" selected>Weekly</option>
+                  <option value="daily">Daily</option>
+                  <option value="hourly">Hourly</option>
+                </select>
+              </label>
+              <label class="opt-field">Effort <span class="hint">(website / GitHub)</span>
+                <select id="sched-effort">
+                  <option value="extended" selected>Extended</option>
+                  <option value="regular">Regular</option>
+                </select>
+              </label>
+              <label class="opt-field">Project
+                <input type="text" id="sched-project" placeholder="Default" autocomplete="off" />
+              </label>
+              <label class="opt-field">Webhook URL <span class="hint">(optional — Slack auto-detected)</span>
+                <input type="text" id="sched-webhook" placeholder="https://hooks.slack.com/services/…" autocomplete="off" spellcheck="false" />
+              </label>
+              <label class="opt-field">Webhook format
+                <select id="sched-format">
+                  <option value="json">JSON</option>
+                  <option value="slack">Slack</option>
+                </select>
+              </label>
+            </div>
+            <label class="opt-field">Auth headers <span class="hint">(optional — one per line, for authenticated website/API scans; stored server-side)</span>
+              <textarea id="sched-auth" class="auth-input" rows="2" spellcheck="false" placeholder="Authorization: Bearer …"></textarea>
+            </label>
+            <button type="submit" class="primary-btn" id="sched-create">Create schedule</button>
+          </form>
+
+          <div id="sched-list" class="sched-list"></div>
+        </div>
       </section>
     </section>
 
@@ -414,8 +563,13 @@
 
     <section id="results" class="results hidden">
       <div class="report-actions">
-        <button type="button" id="export-json" class="action-btn">⬇ Export JSON</button>
+        <button type="button" id="export-json" class="action-btn">⬇ JSON</button>
+        <button type="button" id="export-csv" class="action-btn">⬇ CSV</button>
+        <button type="button" id="export-md" class="action-btn">⬇ Markdown</button>
+        <button type="button" id="export-webhook" class="action-btn" title="POST the report to a webhook. Slack incoming-webhook URLs are auto-formatted as a Slack message.">➦ Webhook / Slack</button>
+        <button type="button" id="export-jira" class="action-btn" title="Create a Jira issue per finding">➦ Jira</button>
         <button type="button" id="export-pdf" class="action-btn">🖨 Save as PDF</button>
+        <button type="button" id="toggle-dismissed" class="action-btn hidden">👁 Show dismissed (0)</button>
       </div>
       <div class="scorecard">
         <div class="gauge">
@@ -655,10 +809,28 @@
       <span>SentryScan</span>
     </div>
     <p>UI · API · Security · Render testing for any website — built for engineers who ship safely.</p>
+    <nav class="footer-links" aria-label="Footer">
+      <a href="/privacy.html">Privacy</a>
+      <a href="/terms.html">Terms</a>
+      <a href="mailto:support@sentryscan.app">Contact</a>
+      <a href="mailto:support@sentryscan.app?subject=Bug%20report">Report a bug</a>
+    </nav>
+    <p>© [PLACEHOLDER: Year] SentryScan. All rights reserved.</p>
   </footer>
+
+  <!-- GDPR cookie-consent banner -->
+  <div id="cookie-banner" class="cookie-banner" hidden>
+    <p>We use an essential cookie to keep you signed in. With your consent we also use privacy-friendly analytics to improve SentryScan. See our <a href="/privacy.html">Privacy Policy</a>.</p>
+    <div class="cookie-actions">
+      <button id="cookie-decline" class="secondary-cta">Decline</button>
+      <button id="cookie-accept" class="primary-cta">Accept</button>
+    </div>
+  </div>
 
   <script src="app.js"></script>
   <script src="ui.js"></script>
   <script src="auth.js"></script>
+  <script src="consent.js"></script>
+  <script src="analytics.js"></script>
 </body>
 </html>

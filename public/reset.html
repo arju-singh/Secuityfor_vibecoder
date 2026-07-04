@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Reset your SentryScan password." />
+  <meta name="theme-color" content="#05070e" />
+  <meta name="robots" content="noindex" />
+  <title>Reset password — SentryScan</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="mask-icon" href="favicon.svg" color="#5b8bff" />
+  <link rel="stylesheet" href="fonts.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Ambient background layers -->
+  <div class="bg-aurora" aria-hidden="true"></div>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-noise" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="SentryScan home">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2.5 4 5.5v5.6c0 5 3.4 8.6 8 10.4 4.6-1.8 8-5.4 8-10.4V5.5L12 2.5Z" />
+          <path d="m8.6 12 2.3 2.3 4.5-4.6" />
+        </svg>
+      </span>
+      <span class="brand-text">
+        <span class="brand-name">SentryScan</span>
+        <span class="tagline">UI · API · Security · Render</span>
+      </span>
+    </a>
+    <a class="nav-cta" href="/" style="margin-left:auto">← Back to app</a>
+  </header>
+
+  <main class="container">
+    <article class="legal" style="max-width:440px;margin:0 auto">
+      <h1 class="section-title" style="font-size:clamp(26px,4vw,34px)">Reset your password</h1>
+      <p class="section-sub" style="margin-bottom:22px">Choose a new password for your SentryScan account.</p>
+
+      <form id="reset-form">
+        <input type="password" id="reset-password" class="auth-input" style="font-family:var(--font);font-size:14.5px;padding:13px 14px" placeholder="New password (min 8 characters)" autocomplete="new-password" minlength="8" required />
+        <button type="submit" id="reset-submit" class="primary-cta" style="width:100%;text-align:center">Update password</button>
+      </form>
+      <p id="reset-msg" class="legal-meta" style="margin-top:16px"></p>
+    </article>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-brand">
+      <span class="logo small" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5 4 5.5v5.6c0 5 3.4 8.6 8 10.4 4.6-1.8 8-5.4 8-10.4V5.5L12 2.5Z" /><path d="m8.6 12 2.3 2.3 4.5-4.6" /></svg>
+      </span>
+      <span>SentryScan</span>
+    </div>
+    <p>UI · API · Security · Render testing for any website — built for engineers who ship safely.</p>
+  </footer>
+
+  <script>
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var token = params.get('token');
+      var form = document.getElementById('reset-form');
+      var pwd = document.getElementById('reset-password');
+      var btn = document.getElementById('reset-submit');
+      var msg = document.getElementById('reset-msg');
+
+      function setMsg(text, ok) {
+        msg.textContent = text;
+        msg.style.color = ok ? 'var(--accent-2)' : 'var(--critical)';
+      }
+
+      if (!token) {
+        setMsg('Invalid or missing reset link', false);
+        if (btn) btn.disabled = true;
+        return;
+      }
+
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var password = pwd.value;
+        if (!password || password.length < 8) {
+          setMsg('Password must be at least 8 characters', false);
+          return;
+        }
+        btn.disabled = true;
+        setMsg('Updating…', true);
+        fetch('/api/auth/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ token: token, password: password })
+        })
+          .then(function (res) {
+            return res.json().catch(function () { return {}; }).then(function (data) {
+              return { ok: res.ok, data: data };
+            });
+          })
+          .then(function (r) {
+            if (r.ok) {
+              msg.innerHTML = 'Password updated — you can now <a href="/">sign in</a>';
+              msg.style.color = 'var(--accent-2)';
+              form.style.display = 'none';
+            } else {
+              setMsg((r.data && (r.data.error || r.data.message)) || 'Could not reset password. The link may have expired.', false);
+              btn.disabled = false;
+            }
+          })
+          .catch(function () {
+            setMsg('Network error — please try again.', false);
+            btn.disabled = false;
+          });
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="SentryScan Privacy Policy — what data we collect, how we use it, cookies, third parties, retention, and your rights." />
+  <meta name="theme-color" content="#05070e" />
+  <title>Privacy Policy — SentryScan</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="mask-icon" href="favicon.svg" color="#5b8bff" />
+  <link rel="stylesheet" href="fonts.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Ambient background layers -->
+  <div class="bg-aurora" aria-hidden="true"></div>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-noise" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="SentryScan home">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2.5 4 5.5v5.6c0 5 3.4 8.6 8 10.4 4.6-1.8 8-5.4 8-10.4V5.5L12 2.5Z" />
+          <path d="m8.6 12 2.3 2.3 4.5-4.6" />
+        </svg>
+      </span>
+      <span class="brand-text">
+        <span class="brand-name">SentryScan</span>
+        <span class="tagline">UI · API · Security · Render</span>
+      </span>
+    </a>
+    <a class="nav-cta" href="/" style="margin-left:auto">← Back to app</a>
+  </header>
+
+  <main class="container">
+    <article class="legal">
+      <h1 class="section-title">Privacy Policy</h1>
+      <p class="legal-meta">Effective date: [PLACEHOLDER: Effective Date] · Last updated: [PLACEHOLDER: Effective Date]</p>
+
+      <h2>Introduction</h2>
+      <p>This Privacy Policy explains how [PLACEHOLDER: Legal Entity Name] ("SentryScan", "we", "us") collects, uses, and protects information when you use SentryScan, the security scanner available at <a href="https://YOUR-DOMAIN.example/">https://YOUR-DOMAIN.example/</a>. SentryScan is designed to be privacy-respecting: the raw code and files you submit are analyzed <strong>in memory and are never written to our disk</strong>, and any secrets we detect are masked before results are saved. The findings report itself is stored to your account so you can revisit it, and you can delete it at any time. By using SentryScan you agree to the practices described here.</p>
+
+      <h2>Data We Collect</h2>
+      <ul>
+        <li><strong>Account data.</strong> When you create an account we store your email address and a securely hashed password (hashed with bcrypt — we never store your password in plain text).</li>
+        <li><strong>Scan inputs (raw code &amp; files).</strong> Uploaded archives, individual files, and pasted code are read into memory, analyzed as text, and <strong>never written to our disk</strong> — the raw content is discarded as soon as the scan finishes. Authentication headers you supply for an authenticated scan are used only for that scan and are not persisted with the report.</li>
+        <li><strong>Scan reports.</strong> When you are signed in, the resulting findings report is saved to your account so it appears in your Projects dashboard and scan history. A report contains the finding details (severity, description, remediation, and the file path + line number), and for flagged code patterns a <strong>short excerpt (up to ~160 characters) around the affected line</strong> so you can locate the issue. Detected secrets and API keys are <strong>masked</strong> (e.g. <code>AKIA…MPLE</code>) before storage — the full secret is never saved. You can delete any scan report at any time, which removes it from our servers.</li>
+        <li><strong>Authentication cookie.</strong> An essential, httpOnly session cookie named <code>sentry_token</code> is set so you stay signed in.</li>
+        <li><strong>Optional analytics.</strong> Only if you consent, we collect privacy-friendly, aggregated usage analytics to help us improve the product.</li>
+      </ul>
+
+      <h2>How We Use Data</h2>
+      <ul>
+        <li>To create and authenticate your account and keep you signed in.</li>
+        <li>To run the scans you request and return the resulting report to you.</li>
+        <li>To process payments and manage subscriptions (via our payment processor).</li>
+        <li>To maintain security, prevent abuse and brute-force attempts, and debug issues.</li>
+        <li>With your consent, to measure aggregate usage and improve SentryScan.</li>
+      </ul>
+
+      <h2>Cookies</h2>
+      <ul>
+        <li><strong>Essential session cookie (<code>sentry_token</code>).</strong> An httpOnly cookie required to keep you logged in. This cookie is strictly necessary and is set without requiring consent.</li>
+        <li><strong>Optional analytics cookie.</strong> Set only after you click "Accept" on our cookie banner. You can decline, and you can withdraw consent at any time by clearing the cookie in your browser.</li>
+      </ul>
+
+      <h2>Third Parties</h2>
+      <p>We share the minimum data necessary with the following service providers:</p>
+      <ul>
+        <li><strong>Stripe</strong> — payment processing for subscriptions. Stripe handles your card details; we do not store them.</li>
+        <li><strong>OSV.dev</strong> — public open-source vulnerability database. During a code scan we send only your <strong>dependency names and version numbers</strong> (e.g. <code>lodash@4.17.19</code>) to check them against known advisories. Your source code is never sent to OSV.dev or any other third party.</li>
+        <li><strong>Optional analytics and email providers</strong> — used, where applicable, to understand aggregate usage (with your consent) and to send account or report emails.</li>
+      </ul>
+
+      <h2>Data Retention</h2>
+      <p>We retain your account data for as long as your account is active. The <strong>raw code and files</strong> you submit are not retained after a scan completes — they are processed in memory and discarded. <strong>Findings reports</strong> are retained in your account (with secrets masked and only short code excerpts, as described above) until you delete them or close your account. If you delete your account, we remove your account data and stored reports within a reasonable period, subject to any legal retention obligations. [PLACEHOLDER: Specify retention periods if required by your jurisdiction.]</p>
+
+      <h2>Your Rights</h2>
+      <p>Depending on your location (for example, under the GDPR), you may have the right to:</p>
+      <ul>
+        <li><strong>Access</strong> the personal data we hold about you.</li>
+        <li><strong>Rectify</strong> inaccurate or incomplete data.</li>
+        <li><strong>Erase</strong> your data ("right to be forgotten").</li>
+        <li><strong>Port</strong> your data to another service.</li>
+      </ul>
+      <p>To exercise any of these rights, contact us at the address below. We will respond within the timeframe required by applicable law.</p>
+
+      <h2>Contact</h2>
+      <p>Questions about this policy or your data? Email us at <a href="mailto:support@sentryscan.app">support@sentryscan.app</a>, or write to [PLACEHOLDER: Legal Entity Name], [PLACEHOLDER: Jurisdiction].</p>
+    </article>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-brand">
+      <span class="logo small" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5 4 5.5v5.6c0 5 3.4 8.6 8 10.4 4.6-1.8 8-5.4 8-10.4V5.5L12 2.5Z" /><path d="m8.6 12 2.3 2.3 4.5-4.6" /></svg>
+      </span>
+      <span>SentryScan</span>
+    </div>
+    <p>UI · API · Security · Render testing for any website — built for engineers who ship safely.</p>
+    <nav class="footer-links" aria-label="Footer">
+      <a href="/privacy.html">Privacy</a>
+      <a href="/terms.html">Terms</a>
+      <a href="mailto:support@sentryscan.app">Contact</a>
+      <a href="mailto:support@sentryscan.app?subject=Bug%20report">Report a bug</a>
+    </nav>
+    <p>© [PLACEHOLDER: Year] SentryScan. All rights reserved.</p>
+  </footer>
+</body>
+</html>
