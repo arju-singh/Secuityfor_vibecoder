@@ -56,12 +56,12 @@
       </span>
     </a>
     <nav class="nav-links" id="primary-nav" aria-label="Primary">
-      <a href="#features">Coverage</a>
-      <a href="#steps">How it works</a>
-      <a href="#compare">Why us</a>
-      <a href="#pricing">Pricing</a>
-      <a href="#faq">FAQ</a>
-      <a class="ghost-link" href="https://owasp.org/Top10/" target="_blank" rel="noopener noreferrer">OWASP ↗</a>
+      <a href="/coverage" data-route>Coverage</a>
+      <a href="/vapt" data-route id="nav-vapt" class="nav-vapt">🎯 VAPT</a>
+      <a href="/how-it-works" data-route>How it works</a>
+      <a href="/why-us" data-route>Why us</a>
+      <a href="/pricing" data-route>Pricing</a>
+      <a href="/faq" data-route>FAQ</a>
     </nav>
     <button class="nav-toggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="primary-nav"><span></span><span></span><span></span></button>
     <button class="nav-signin" id="nav-signin" type="button">Sign in</button>
@@ -240,6 +240,22 @@
           <p>A 0–100 grade with per-category breakdown, evidence, copy-paste repro, and concrete fixes — exportable as JSON or PDF.</p>
           <span class="fc-tag">Grade · Evidence · Fixes</span>
         </article>
+        <article class="feature-card reveal" data-tilt>
+          <span class="fc-ico" style="--g1:#ff5168;--g2:#ff9447">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/></svg>
+          </span>
+          <h3>Active pen-test (VAPT)</h3>
+          <p>Opt-in offensive probes: host-header injection, CORS credential exposure, JWT &amp; session-cookie weaknesses, attack-surface enumeration, cache deception, and verb tampering.</p>
+          <span class="fc-tag">Opt-in · Active</span>
+        </article>
+        <article class="feature-card reveal" data-tilt>
+          <span class="fc-ico" style="--g1:#5b8bff;--g2:#2fe0b0">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="7"/><rect x="12" y="6" width="3" height="11"/><rect x="17" y="13" width="3" height="4"/></svg>
+          </span>
+          <h3>Analytics (VART)</h3>
+          <p>Aggregate risk posture across every scan on your account — score trend, OWASP Top-10 &amp; category breakdowns, and a ranked fix list. Private to your account, secrets masked.</p>
+          <span class="fc-tag">Account-private</span>
+        </article>
       </div>
     </section>
 
@@ -255,6 +271,7 @@
         <button class="tab" data-tab="projects" role="tab"><span class="tab-ico" aria-hidden="true">📊</span> Projects</button>
         <button class="tab" data-tab="history" role="tab"><span class="tab-ico" aria-hidden="true">🕘</span> History</button>
         <button class="tab" data-tab="schedules" role="tab"><span class="tab-ico" aria-hidden="true">⏰</span> Schedules</button>
+        <button class="tab" data-tab="analytics" role="tab"><span class="tab-ico" aria-hidden="true">📈</span> Analytics</button>
       </div>
 
       <!-- Website panel -->
@@ -273,6 +290,7 @@
           <summary>⚙ Scan options</summary>
           <label class="check"><input type="checkbox" id="render-toggle" checked /> Include live JavaScript / render test (headless browser)</label>
           <label class="check"><input type="checkbox" id="audits-toggle" checked /> Include quality audits (performance · accessibility · SEO)</label>
+          <label class="check"><input type="checkbox" id="vapt-toggle" /> 🎯 Active pen-test (VAPT) — deeper probes: host-header injection, CORS credential exposure, JWT/cookie weaknesses, attack-surface enumeration, cache deception, verb tampering. Only run against sites you own or are authorized to test.</label>
           <label class="opt-select">Effort
             <select id="website-effort">
               <option value="extended" selected>Extended — full deep-dive (all probes)</option>
@@ -314,6 +332,7 @@
           <label class="check"><input type="checkbox" id="fuzz-toggle" /> Fuzz query parameters (sends crafted inputs — SQLi, XSS, path traversal, command injection, SSTI — to each parameter)</label>
           <label class="check"><input type="checkbox" id="enumerate-toggle" /> Enumerate endpoints from the API's OpenAPI/Swagger spec</label>
           <label class="check"><input type="checkbox" id="ratelimit-toggle" /> Test rate limiting (sends a burst of requests)</label>
+          <label class="check"><input type="checkbox" id="api-vapt-toggle" /> 🎯 Active pen-test (VAPT) — host-header injection, CORS credential exposure, JWT/cookie weaknesses, surface enumeration, verb tampering. Only run against endpoints you own or are authorized to test.</label>
         </details>
         <details class="auth-box" id="fuzz-advanced">
           <summary>🧬 Advanced: fuzz a request body (POST/PUT/PATCH)</summary>
@@ -546,11 +565,63 @@
             <label class="opt-field">Auth headers <span class="hint">(optional — one per line, for authenticated website/API scans; stored server-side)</span>
               <textarea id="sched-auth" class="auth-input" rows="2" spellcheck="false" placeholder="Authorization: Bearer …"></textarea>
             </label>
+            <label class="check"><input type="checkbox" id="sched-vapt" /> 🎯 Include active pen-test (VAPT) on each run <span class="hint">(website / API targets only)</span></label>
             <button type="submit" class="primary-btn" id="sched-create">Create schedule</button>
           </form>
 
           <div id="sched-list" class="sched-list"></div>
         </div>
+      </section>
+
+      <!-- Analytics (VART) panel -->
+      <section class="panel" id="panel-analytics">
+        <div class="history-head">
+          <p class="hint" style="margin:0">Vulnerability analytics across <strong>every scan on your account</strong> — current risk posture, trend over time, OWASP Top-10 &amp; category breakdowns, and a ranked fix list. Private to your account, computed from your stored scans (no data leaves the server), with secrets masked.</p>
+          <div class="an-actions">
+            <button type="button" id="an-export" class="action-btn" hidden>⭳ Export report</button>
+            <button type="button" id="an-refresh" class="action-btn">↻ Refresh</button>
+          </div>
+        </div>
+        <div id="an-gate" class="hint hidden">Sign in to see analytics across your saved scans.</div>
+        <div id="an-empty" class="hint hidden">No saved scans yet. Run a scan while signed in — your analytics build up automatically here.</div>
+        <div id="an-body" class="an-body hidden"></div>
+      </section>
+
+      <!-- VAPT — Vulnerability Assessment & Penetration Testing -->
+      <section class="panel" id="panel-vapt">
+        <h2 class="panel-title">VAPT — Vulnerability Assessment &amp; Penetration Testing</h2>
+        <p class="panel-lead">Run SentryScan's <strong>full battery</strong> against one target in a single pass — recon, security posture, OWASP probes, the active pen-test engine, access-control, API surface &amp; injection fuzzing, and a live render. Then work the professional checklist below: every item is mapped to what we <strong>automate</strong> versus what still needs <strong>manual</strong> testing, so nothing is oversold.</p>
+        <form id="vapt-form" class="url-form">
+          <input type="text" id="vapt-input" placeholder="acme.com  or  https://api.acme.com/v1" autocomplete="off" spellcheck="false" />
+          <button type="submit">Run VAPT assessment</button>
+        </form>
+        <div class="presets">
+          <p class="presets-label">Try a known practice target:</p>
+          <div class="preset-chips" data-target="vapt-input"></div>
+        </div>
+        <details class="opt-box">
+          <summary>⚙ Assessment options</summary>
+          <label class="opt-select">Effort
+            <select id="vapt-effort">
+              <option value="extended" selected>Extended — full deep-dive (all probes)</option>
+              <option value="regular">Regular — faster, core checks only</option>
+            </select>
+          </label>
+          <label class="check danger-check"><input type="checkbox" id="vapt-allow-write" /> ⚠ Enable active / state-changing probes — brute-force resistance, race-condition, and write-method fuzzing. Only on systems you own or are explicitly authorized to test.</label>
+          <p class="hint" style="margin-top:0">A VAPT assessment runs many suites at once and sends more requests than a standard scan. Point it only at authorized targets. <code>localhost</code>/private ranges are blocked unless the server sets <code>SENTRYSCAN_ALLOW_LOCAL=1</code>.</p>
+        </details>
+        <details class="auth-box">
+          <summary>🔐 Authenticated assessment (optional)</summary>
+          <p class="auth-hint">Send these headers with every request so the whole battery tests the app as a logged-in user — this unlocks access-control, IDOR, and JWT/session checks. One per line, e.g. <code>Authorization: Bearer …</code> or <code>Cookie: session=…</code>. Only use credentials you own.</p>
+          <textarea id="vapt-auth" class="auth-input" rows="3" spellcheck="false" placeholder="Authorization: Bearer eyJhbGci...&#10;Cookie: session_id=abc123"></textarea>
+          <div class="profile-row" data-target="vapt-auth">
+            <select class="profile-select"><option value="">— saved profiles —</option></select>
+            <button type="button" class="profile-apply link-btn">Apply</button>
+            <input type="text" class="profile-name" placeholder="name to save" />
+            <button type="button" class="profile-save link-btn">Save</button>
+            <button type="button" class="profile-del link-btn">Delete</button>
+          </div>
+        </details>
       </section>
     </section>
 
@@ -595,6 +666,16 @@
       </div>
 
       <div id="findings" class="findings"></div>
+    </section>
+
+    <!-- VAPT methodology & coverage checklist (linked from the footer) -->
+    <section id="methodology" class="section">
+      <div class="section-head reveal">
+        <span class="kicker">VAPT methodology</span>
+        <h2 class="section-title">The professional VAPT checklist — <span class="grad">honestly mapped.</span></h2>
+        <p class="section-sub">Every item a professional VAPT engagement covers, marked by how SentryScan handles it: automated in-app, a partial signal to confirm manually, or out of a black-box web scanner's reach. Run an assessment from the <a href="/vapt" data-route>VAPT page</a>.</p>
+      </div>
+      <div id="vapt-content" class="vapt-content"></div>
     </section>
 
     <!-- How it works — 3 steps -->
@@ -810,6 +891,7 @@
     </div>
     <p>UI · API · Security · Render testing for any website — built for engineers who ship safely.</p>
     <nav class="footer-links" aria-label="Footer">
+      <a href="/methodology" data-route>VAPT methodology</a>
       <a href="/privacy.html">Privacy</a>
       <a href="/terms.html">Terms</a>
       <a href="mailto:support@sentryscan.app">Contact</a>
@@ -828,6 +910,7 @@
   </div>
 
   <script src="app.js"></script>
+  <script src="router.js"></script>
   <script src="ui.js"></script>
   <script src="auth.js"></script>
   <script src="consent.js"></script>

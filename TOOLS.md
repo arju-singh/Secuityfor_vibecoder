@@ -103,6 +103,25 @@ Secrets/keys (AWS, Google, Stripe, GitHub, GitLab, Slack, SendGrid, Twilio, npm,
 
 ---
 
+## VAPT — active pen-test engine (`vaptScanner.js`)
+
+Opt-in suite (checkbox on the Website and API forms) that manipulates requests and enumerates attack surface rather than only reading responses. Read-only / GET-safe by default; the one state-changing check (login brute-force resistance) is gated behind the destructive-write opt-in. Adds checks the passive suites don't cover:
+
+- **Host-header injection** — reflects a canary `X-Forwarded-Host` / `Forwarded` / `X-Host` into a redirect or the body (password-reset poisoning, cache poisoning).
+- **CORS credential exposure** — arbitrary-Origin (and `Origin: null`) reflection paired with `Access-Control-Allow-Credentials: true` (account-takeover-grade CORS).
+- **JWT weaknesses** — `alg:none`, missing `exp`, HS256 key-confusion note. Raw tokens masked in evidence.
+- **Session-cookie hardening** — `SameSite=None` without `Secure`, `__Host-` prefix violations, missing `Secure` on HTTPS.
+- **Attack-surface enumeration** — curated admin/debug/CI/IaC/cloud paths beyond urlScanner's 11, effort-scaled, with body-signature matching for exposed secrets.
+- **Web cache deception** — static-suffix trick that returns the same cacheable authenticated body.
+- **Verb / method-override tampering** — a 401/403 that flips to 200 under `X-HTTP-Method-Override`.
+- **Brute-force resistance** (opt-in write) — burst of the supplied login request, watching for 429/lockout.
+
+## Analytics ("VART" — Vulnerability Analytics & Reporting) page
+
+Account-private dashboard (`GET /api/analytics`, `requireAuth`, owner-scoped) that aggregates **every saved scan** for the signed-in user: current risk posture (score/grade), score trend over time, dismissal-adjusted severity distribution, OWASP Top-10 & category breakdowns, per-project rollup, and a ranked top-fixes list. Computed purely from stored data (no external calls); every finding it returns is **secret-masked**; the report export is generated entirely in the browser.
+
+---
+
 ## Supporting tools
 
 - **Authenticated scanning** — attach headers (Authorization/Cookie) to every request across all suites incl. the headless browser; credentials redacted in exports.

@@ -87,6 +87,7 @@ export const websiteSchema = {
   url: { type: 'string', required: true, maxLength: URL_MAX },
   render: { type: 'boolean', default: true },
   audits: { type: 'boolean', default: true },
+  vapt: { type: 'boolean', default: false },
   effort: EFFORT,
   project: PROJECT,
   headers: { type: 'headers' }
@@ -97,6 +98,15 @@ export const githubSchema = {
   effort: EFFORT,
   paths: PATHS,
   project: PROJECT
+};
+
+// Full VAPT assessment: runs the whole scanner battery against one target.
+export const vaptSchema = {
+  url: { type: 'string', required: true, maxLength: URL_MAX },
+  effort: EFFORT,
+  allowWrite: { type: 'boolean', default: false },
+  project: PROJECT,
+  headers: { type: 'headers' }
 };
 
 export const billingSchema = {
@@ -124,6 +134,7 @@ export const apiSchema = {
   fuzz: { type: 'boolean', default: false },
   access: { type: 'boolean', default: true },
   enumerate: { type: 'boolean', default: false },
+  vapt: { type: 'boolean', default: false },
   rateLimit: { type: 'boolean', default: false },
   allowWrite: { type: 'boolean', default: false },
   method: { type: 'string', maxLength: 10, uppercase: true, enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'] },

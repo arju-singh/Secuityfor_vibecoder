@@ -5,8 +5,8 @@ const SEV_COLORS = {
   critical: 'var(--critical)', high: 'var(--high)', medium: 'var(--medium)',
   low: 'var(--low)', info: 'var(--info)'
 };
-const CAT_LABELS = { ui: 'UI', security: 'Security', vuln: 'Vulnerabilities', render: 'Render', api: 'API', code: 'Code', fuzz: 'Fuzzing', access: 'Access control', spec: 'API surface', perf: 'Performance', a11y: 'Accessibility', seo: 'SEO', quality: 'Code quality', frontend: 'Frontend', config: 'Config & DevOps', testing: 'Testing', hygiene: 'Project hygiene', seccode: 'Code security', deps: 'Dependencies' };
-const CAT_ICONS = { ui: '🧩', security: '🛡️', vuln: '🎯', render: '🖥️', api: '🔌', code: '📦', fuzz: '🧬', access: '🔓', spec: '📜', perf: '⚡', a11y: '♿', seo: '🔎', quality: '🧹', frontend: '🎨', config: '⚙️', testing: '🧪', hygiene: '📋', seccode: '🔐', deps: '📦' };
+const CAT_LABELS = { ui: 'UI', security: 'Security', vuln: 'Vulnerabilities', render: 'Render', api: 'API', code: 'Code', fuzz: 'Fuzzing', access: 'Access control', spec: 'API surface', vapt: 'Active pen-test', perf: 'Performance', a11y: 'Accessibility', seo: 'SEO', quality: 'Code quality', frontend: 'Frontend', config: 'Config & DevOps', testing: 'Testing', hygiene: 'Project hygiene', seccode: 'Code security', deps: 'Dependencies' };
+const CAT_ICONS = { ui: '🧩', security: '🛡️', vuln: '🎯', render: '🖥️', api: '🔌', code: '📦', fuzz: '🧬', access: '🔓', spec: '📜', vapt: '🎯', perf: '⚡', a11y: '♿', seo: '🔎', quality: '🧹', frontend: '🎨', config: '⚙️', testing: '🧪', hygiene: '📋', seccode: '🔐', deps: '📦' };
 
 // Severity definitions — shown as a tooltip on each badge and in the Learn tab.
 // These mirror how the report reasons about exploitability, not just impact.
@@ -59,12 +59,13 @@ document.getElementById('website-form').addEventListener('submit', async (e) => 
   if (!url) return;
   const render = document.getElementById('render-toggle').checked;
   const audits = document.getElementById('audits-toggle').checked;
+  const vapt = document.getElementById('vapt-toggle').checked;
   const effort = document.getElementById('website-effort').value;
   const authHeaders = parseAuthHeaders('website-auth');
-  await runScan('Testing ' + url + ' (UI · security' + (render ? ' · render' : '') + (audits ? ' · audits' : '') + ' · ' + effort + (authHeaders ? ' · authenticated' : '') + ') …', () =>
+  await runScan('Testing ' + url + ' (UI · security' + (render ? ' · render' : '') + (audits ? ' · audits' : '') + (vapt ? ' · pen-test' : '') + ' · ' + effort + (authHeaders ? ' · authenticated' : '') + ') …', () =>
     fetch('/api/test/website', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, render, audits, effort, project: getActiveProject(), headers: authHeaders })
+      body: JSON.stringify({ url, render, audits, vapt, effort, project: getActiveProject(), headers: authHeaders })
     })
   );
 });
@@ -83,10 +84,27 @@ document.getElementById('api-form').addEventListener('submit', async (e) => {
     .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
   const enumerate = document.getElementById('enumerate-toggle').checked;
   const rateLimit = document.getElementById('ratelimit-toggle').checked;
-  await runScan('Testing API endpoint ' + url + (fuzz ? ' (with parameter fuzzing)' : '') + ' …', () =>
+  const vapt = document.getElementById('api-vapt-toggle').checked;
+  await runScan('Testing API endpoint ' + url + (fuzz ? ' (with parameter fuzzing)' : '') + (vapt ? ' (with pen-test)' : '') + ' …', () =>
     fetch('/api/test/api', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, fuzz, headers: authHeaders, method, body: fuzzBody, allowWrite, customPayloads, enumerate, rateLimit, project: getActiveProject() })
+      body: JSON.stringify({ url, fuzz, headers: authHeaders, method, body: fuzzBody, allowWrite, customPayloads, enumerate, rateLimit, vapt, project: getActiveProject() })
+    })
+  );
+});
+
+// --- Full VAPT assessment --------------------------------------------------
+document.getElementById('vapt-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const url = document.getElementById('vapt-input').value.trim();
+  if (!url) return;
+  const effort = document.getElementById('vapt-effort').value;
+  const allowWrite = document.getElementById('vapt-allow-write').checked;
+  const authHeaders = parseAuthHeaders('vapt-auth');
+  await runScan('Running full VAPT assessment on ' + url + ' (recon · security · OWASP · pen-test · access · API · fuzzing · render' + (allowWrite ? ' · active probes' : '') + (authHeaders ? ' · authenticated' : '') + ') — this runs many suites and can take a minute …', () =>
+    fetch('/api/test/vapt', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, effort, allowWrite, project: getActiveProject(), headers: authHeaders })
     })
   );
 });
@@ -708,6 +726,179 @@ function buildPresetChips(container, presets, tabName) {
   });
 }
 
+// ===========================================================================
+// VAPT methodology — the full professional checklist, each item honestly mapped
+// to how SentryScan covers it: Automated (in-app), Partial (signal / needs
+// confirmation), or Manual (out of a black-box web scanner's reach — do it by
+// hand with the noted tool). Rendered statically into the VAPT page.
+// ===========================================================================
+const VAPT_STATUS = {
+  auto: { label: 'Automated', cls: 'auto' },
+  partial: { label: 'Partial', cls: 'partial' },
+  manual: { label: 'Manual', cls: 'manual' }
+};
+const VAPT_METHOD = [
+  { n: '1. Information Gathering (Recon)', items: [
+    ['WHOIS', 'manual', 'whois'], ['DNS records (A/MX/TXT/NS)', 'manual', 'dig'], ['Subdomain enumeration', 'manual', 'Subfinder/Amass'],
+    ['Public IP addresses', 'manual'], ['Technology & framework', 'auto'], ['Server / web-server version', 'auto'], ['CMS detection', 'auto'],
+    ['JavaScript files', 'auto'], ['API endpoints', 'auto'], ['robots.txt', 'auto'], ['sitemap.xml', 'auto'], ['Git exposure (.git)', 'auto'],
+    ['Swagger / OpenAPI docs', 'auto'], ['Hidden directories', 'auto'], ['Backup files', 'auto'], ['Source maps', 'auto'],
+    ['Third-party libraries', 'auto'], ['Email / metadata leaks', 'partial'], ['SSL certificate', 'auto'], ['Cloud storage buckets', 'manual'], ['CDN detection', 'partial'] ] },
+  { n: '2. Authentication Testing', items: [
+    ['Weak / default passwords', 'manual', 'Hydra'], ['Password policy', 'partial'], ['Brute force / rate limit', 'auto'], ['Credential stuffing', 'manual'],
+    ['Login bypass', 'partial'], ['MFA bypass', 'manual'], ['Session fixation', 'partial'], ['Session timeout', 'manual'], ['Account lockout', 'partial'],
+    ['Password reset flaws', 'manual'], ['OTP / email-verify bypass', 'manual'], ['JWT manipulation (alg:none / exp)', 'auto'], ['OAuth issues', 'manual'],
+    ['Token replay / expiry', 'partial'], ['Refresh token abuse', 'manual'] ] },
+  { n: '3. Authorization Testing', items: [
+    ['Horizontal privilege escalation', 'partial'], ['Vertical privilege escalation', 'partial'], ['IDOR', 'auto'], ['Missing authorization', 'auto'],
+    ['Admin page access', 'auto'], ['Hidden endpoints', 'auto'], ['API authorization', 'auto'], ['Resource ownership', 'partial'], ['Role validation', 'manual'] ] },
+  { n: '4. Session Management', items: [
+    ['Cookie HttpOnly', 'auto'], ['Cookie Secure flag', 'auto'], ['Cookie SameSite', 'auto'], ['Session expiration', 'manual'], ['Session hijacking', 'partial'],
+    ['Predictable session IDs', 'partial'], ['Logout functionality', 'manual'], ['Concurrent sessions', 'manual'], ['Session invalidation', 'manual'] ] },
+  { n: '5. Injection & Input Validation', items: [
+    ['SQL injection (error/boolean/time/blind)', 'auto'], ['NoSQL / Mongo injection', 'partial'], ['Second-order SQLi', 'manual'], ['XSS — reflected', 'auto'],
+    ['XSS — stored', 'partial'], ['XSS — DOM', 'partial'], ['Command injection', 'auto'], ['SSTI / template injection', 'auto'], ['Path traversal', 'auto'],
+    ['CRLF injection', 'partial'], ['HTTP parameter pollution', 'manual'] ] },
+  { n: '6. CSRF', items: [
+    ['Missing CSRF token', 'auto'], ['Weak CSRF protection', 'partial'], ['Cookie-only authentication', 'partial'], ['Sensitive POST without token', 'partial'] ] },
+  { n: '7. File Upload / Download', items: [
+    ['Malicious upload (PHP/JSP/SVG/HTML)', 'manual'], ['Double-extension / MIME bypass', 'manual'], ['Magic-byte validation', 'manual'],
+    ['Directory / path traversal', 'auto'], ['Sensitive file exposure', 'auto'], ['Config / log exposure', 'auto'] ] },
+  { n: '8. XML / JSON Issues', items: [
+    ['XXE', 'manual'], ['XML bomb / injection', 'manual'], ['JSON injection', 'partial'], ['Mass assignment', 'partial'], ['Prototype pollution', 'partial'] ] },
+  { n: '9. API Security', items: [
+    ['Broken authentication', 'auto'], ['Broken object-level auth (BOLA / IDOR)', 'auto'], ['Rate limiting', 'auto'], ['JWT security', 'auto'],
+    ['API key / token leakage', 'auto'], ['GraphQL introspection', 'auto'], ['REST / SOAP checks', 'partial'], ['Excessive data exposure', 'partial'],
+    ['Shadow APIs', 'manual'], ['Swagger / doc exposure', 'auto'], ['API business-logic flaws', 'manual'] ] },
+  { n: '10. Business Logic & Payment', items: [
+    ['Price / amount manipulation', 'manual'], ['Coupon / reward abuse', 'manual'], ['Workflow / step bypass', 'manual'], ['Cart / order manipulation', 'manual'],
+    ['Race conditions', 'partial'], ['Duplicate / replay payment', 'manual'], ['Currency modification', 'manual'], ['Webhook / callback validation', 'manual'], ['Refund abuse', 'manual'] ] },
+  { n: '11. Cryptography', items: [
+    ['Weak hashing (MD5 / SHA1)', 'auto'], ['ECB / weak encryption', 'partial'], ['Hardcoded keys', 'auto'], ['Insecure randomness', 'auto'],
+    ['Key storage', 'partial'], ['Sensitive-data encryption', 'partial'] ] },
+  { n: '12. Sensitive Data Exposure', items: [
+    ['Passwords / secrets in responses', 'auto'], ['JWT / access / refresh tokens', 'auto'], ['Credit cards / PAN', 'partial'], ['Email / phone / PII', 'partial'],
+    ['Env variables / config', 'auto'], ['Secrets in logs', 'partial'] ] },
+  { n: '13. HTTP Security Headers', items: [
+    ['HSTS', 'auto'], ['X-Frame-Options', 'auto'], ['Content-Security-Policy', 'auto'], ['Referrer-Policy', 'auto'], ['Permissions-Policy', 'auto'],
+    ['X-Content-Type-Options', 'auto'], ['Cache-Control', 'partial'], ['CORS headers', 'auto'] ] },
+  { n: '14. CORS', items: [
+    ['Wildcard *', 'auto'], ['Origin reflection', 'auto'], ['Credentials + reflection', 'auto'], ['Subdomain abuse', 'partial'] ] },
+  { n: '15. Server & SSL/TLS', items: [
+    ['Server / version disclosure', 'auto'], ['Banner grabbing', 'auto'], ['Default pages', 'partial'], ['Directory listing', 'auto'], ['TLS version', 'auto'],
+    ['Weak ciphers', 'auto'], ['Expired / invalid certificate', 'auto'], ['Certificate chain', 'auto'], ['Forward secrecy', 'partial'] ] },
+  { n: '16. Network Testing', items: [
+    ['Open ports', 'manual', 'Nmap'], ['SSH / FTP / SMTP', 'manual', 'Nmap'], ['Redis / Mongo / Elasticsearch', 'manual', 'Nmap'],
+    ['Docker / Kubernetes exposure', 'partial'], ['Firewall / VPN', 'manual'] ] },
+  { n: '17. Mobile Security', items: [
+    ['APK reverse engineering', 'manual', 'MobSF'], ['Certificate pinning', 'manual'], ['Root detection', 'manual'], ['Local DB / SharedPrefs', 'manual'],
+    ['Hardcoded secrets', 'manual', 'MobSF'], ['Deep links / exported activities', 'manual'] ] },
+  { n: '18. Cloud Security', items: [
+    ['S3 / bucket permissions', 'manual'], ['IAM / security groups', 'manual'], ['Cloud metadata SSRF', 'partial'], ['Public buckets', 'manual'],
+    ['Cloud keys in code', 'auto'], ['Cloud functions / storage', 'manual'] ] },
+  { n: '19. Docker & Kubernetes', items: [
+    ['Docker daemon / socket', 'manual'], ['Container escape', 'manual'], ['Exposed dashboard / actuator', 'auto'], ['RBAC / network policies', 'manual'],
+    ['Dockerfile misconfig', 'auto'], ['Secrets in images', 'partial'] ] },
+  { n: '20. Dependency Security', items: [
+    ['npm / pip / maven / composer CVEs', 'auto'], ['Outdated libraries', 'auto'], ['Known CVEs (OSV.dev)', 'auto'], ['License issues', 'partial'], ['Supply-chain / typosquat', 'partial'] ] },
+  { n: '21. Logging & Monitoring', items: [
+    ['Sensitive data in logs', 'partial'], ['Audit logs', 'manual'], ['Log injection', 'manual'], ['Monitoring / alerting / SIEM', 'manual'] ] },
+  { n: '22. Error Handling', items: [
+    ['Stack traces', 'auto'], ['Database errors', 'auto'], ['Debug mode', 'auto'], ['Verbose responses', 'auto'], ['Internal IP disclosure', 'auto'] ] },
+  { n: '23. Denial of Service', items: [
+    ['Rate limiting present', 'auto'], ['Large-payload handling', 'partial'], ['Flooding / Slowloris', 'manual'], ['Resource exhaustion', 'manual'] ] },
+  { n: '24. Race Conditions', items: [
+    ['Concurrent-request race probe', 'partial'], ['Double spending', 'manual'], ['Duplicate orders', 'manual'], ['Reward / payment duplication', 'manual'] ] },
+  { n: '25. Clickjacking', items: [
+    ['Iframe embedding allowed', 'auto'], ['Missing X-Frame-Options / frame-ancestors', 'auto'] ] },
+  { n: '26. Open Redirect', items: [ ['Redirect parameter manipulation', 'auto'] ] },
+  { n: '27. SSRF', items: [
+    ['Internal service access', 'partial'], ['Cloud metadata', 'partial'], ['Private IP access', 'partial'], ['DNS rebinding', 'manual'] ] },
+  { n: '28. Deserialization', items: [
+    ['Java / PHP / Python / Node deserialization', 'manual'], ['Unsafe object deserialization', 'partial'] ] },
+  { n: '29. Remote Code Execution', items: [
+    ['Command execution', 'partial'], ['Template injection', 'auto'], ['Unsafe eval', 'partial'], ['Unsafe libraries', 'partial'] ] },
+  { n: '30. WebSocket Security', items: [
+    ['Authentication / authorization', 'manual'], ['Message tampering / replay', 'manual'], ['Rate limiting', 'manual'] ] },
+  { n: '31. Secrets Management', items: [
+    ['GitHub / repo leaks', 'auto'], ['AWS / GCP / Firebase keys', 'auto'], ['API keys', 'auto'], ['Private keys / certificates', 'auto'], ['Environment variables', 'auto'] ] },
+  { n: '32. Source Code Review (White Box)', items: [
+    ['Hardcoded passwords', 'auto'], ['Unsafe SQL queries', 'auto'], ['Unsafe functions (eval/exec)', 'auto'], ['Insecure randomness', 'auto'],
+    ['Secrets', 'auto'], ['Unsafe file handling', 'auto'], ['Logic flaws', 'partial'], ['Input validation', 'auto'] ] },
+  { n: '33. Configuration Review', items: [
+    ['Debug mode', 'auto'], ['Environment configs', 'auto'], ['Default credentials', 'partial'], ['Open admin panels', 'auto'], ['Verbose logging', 'partial'] ] },
+  { n: '34. Compliance', items: [
+    ['OWASP Top 10 mapping', 'auto'], ['OWASP API Top 10', 'partial'], ['SANS Top 25 / CWE', 'partial'], ['CVE mapping', 'auto'], ['PCI DSS', 'manual'], ['ISO 27001', 'manual'] ] },
+  { n: '35. Advanced Testing', items: [
+    ['JWT algorithm confusion', 'partial'], ['JWT signature bypass', 'partial'], ['Web cache deception', 'auto'], ['Cache poisoning', 'partial'],
+    ['HTTP request smuggling', 'manual'], ['HTTP response splitting', 'manual'], ['Host header injection', 'auto'], ['DNS rebinding', 'manual'],
+    ['CRLF injection', 'partial'], ['Prototype pollution', 'partial'], ['Insecure deserialization', 'manual'], ['XXE', 'manual'], ['SSRF', 'partial'],
+    ['RCE chaining', 'partial'], ['Supply-chain attacks', 'auto'], ['Client-side path traversal', 'manual'], ['Browser cache poisoning', 'partial'],
+    ['Unicode normalization', 'manual'], ['HTTP parameter pollution', 'manual'] ] }
+];
+const VAPT_FRAMEWORKS = ['OWASP Web Security Testing Guide (WSTG)', 'OWASP API Security Top 10', 'OWASP Top 10 (2021)', 'PTES', 'NIST SP 800-115', 'OSSTMM', 'MITRE ATT&CK', 'SANS Top 25', 'CWE', 'CVE', 'PCI DSS', 'ISO 27001'];
+// ★ = SentryScan automates part of this capability in-app.
+const VAPT_TOOLS = [
+  ['Burp Suite', 0], ['OWASP ZAP', 1], ['Nmap', 0], ['Nikto', 1], ['sqlmap', 1], ['ffuf', 0], ['dirsearch', 1], ['Gobuster', 0],
+  ['Amass', 0], ['Subfinder', 0], ['Nuclei', 1], ['Metasploit', 0], ['Wireshark', 0], ['Hydra', 0], ['John the Ripper', 0], ['Hashcat', 0],
+  ['MobSF', 0], ['Postman / Insomnia', 1], ['Trivy', 1], ['SonarQube', 1], ['GitLeaks / TruffleHog', 1]
+];
+const VAPT_REPORTING = [
+  ['CVSS-style severity', 'Every finding carries a severity + confidence + OWASP category.'],
+  ['Risk categorization', 'Critical / High / Medium / Low / Info, rolled into a 0–100 grade.'],
+  ['Proof of Concept', 'Copy-paste curl reproduction per finding, plus a sqlmap hand-off for SQLi.'],
+  ['Business impact', 'Each finding explains what an attacker could actually do.'],
+  ['Remediation', 'Specific, per-finding fix guidance — not generic advice.'],
+  ['Executive summary', 'Grade + severity breakdown + trend, exportable as JSON / PDF.'],
+  ['Retest', 'Re-run any target; dismissals and the score trend track fixes over time.']
+];
+
+function buildVaptContent() {
+  const host = document.getElementById('vapt-content');
+  if (!host) return;
+  let a = 0, p = 0, m = 0, total = 0;
+  VAPT_METHOD.forEach((s) => s.items.forEach((it) => { total++; if (it[1] === 'auto') a++; else if (it[1] === 'partial') p++; else m++; }));
+
+  const summary = `<div class="vapt-summary">
+    <div class="vapt-sum-lead"><h3 class="vapt-h">Coverage against the professional VAPT checklist</h3>
+      <p class="hint" style="margin:0">${total} checklist items mapped honestly. Running an assessment above exercises the <strong>Automated</strong> and (where you enable active probes) the <strong>Partial</strong> items; the <strong>Manual</strong> ones need a human tester with the noted tools — this page tells you exactly which is which.</p></div>
+    <div class="vapt-sum-stats">
+      <span class="vapt-stat auto"><b>${a}</b> Automated</span>
+      <span class="vapt-stat partial"><b>${p}</b> Partial</span>
+      <span class="vapt-stat manual"><b>${m}</b> Manual</span>
+    </div></div>`;
+
+  const legend = `<div class="vapt-legend">
+    <span class="vapt-dot auto"></span> Automated in-app
+    <span class="vapt-dot partial"></span> Partial — signal, confirm manually
+    <span class="vapt-dot manual"></span> Manual — out of a black-box web scanner's reach</div>`;
+
+  const sections = '<div class="vapt-grid">' + VAPT_METHOD.map((s) => {
+    const counts = { auto: 0, partial: 0, manual: 0 };
+    s.items.forEach((it) => counts[it[1]]++);
+    const items = s.items.map((it) => {
+      const st = VAPT_STATUS[it[1]];
+      const tool = it[2] ? `<span class="vapt-tool">${anEsc(it[2])}</span>` : '';
+      return `<li class="vapt-item"><span class="vapt-dot ${st.cls}" title="${st.label}"></span><span class="vapt-item-t">${anEsc(it[0])}</span>${tool}</li>`;
+    }).join('');
+    return `<div class="vapt-card">
+      <div class="vapt-card-head"><h4 class="vapt-card-title">${anEsc(s.n)}</h4>
+        <span class="vapt-card-mini">${counts.auto}<i class="vapt-dot auto"></i> ${counts.partial}<i class="vapt-dot partial"></i> ${counts.manual}<i class="vapt-dot manual"></i></span></div>
+      <ul class="vapt-items">${items}</ul></div>`;
+  }).join('') + '</div>';
+
+  const frameworks = `<div class="vapt-card vapt-wide"><h4 class="vapt-card-title">Frameworks &amp; methodologies referenced</h4>
+    <div class="vapt-chips">${VAPT_FRAMEWORKS.map((f) => `<span class="vapt-chip">${anEsc(f)}</span>`).join('')}</div></div>`;
+
+  const tools = `<div class="vapt-card vapt-wide"><h4 class="vapt-card-title">Tools used in professional VAPT <span class="hint" style="font-weight:400">— ★ = SentryScan automates part of this in-app</span></h4>
+    <div class="vapt-chips">${VAPT_TOOLS.map((t) => `<span class="vapt-chip${t[1] ? ' star' : ''}">${t[1] ? '★ ' : ''}${anEsc(t[0])}</span>`).join('')}</div></div>`;
+
+  const reporting = `<div class="vapt-card vapt-wide"><h4 class="vapt-card-title">Reporting (what a good VAPT deliverable includes)</h4>
+    <div class="vapt-report">${VAPT_REPORTING.map((r) => `<div class="vapt-report-row"><strong>${anEsc(r[0])}</strong><span>${anEsc(r[1])}</span></div>`).join('')}</div></div>`;
+
+  host.innerHTML = summary + legend + sections + frameworks + tools + reporting;
+}
+
 function buildLearnContent() {
   const ol = document.getElementById('method-list');
   METHODOLOGY.forEach(([t, d]) => {
@@ -1184,6 +1375,7 @@ document.getElementById('sched-form').addEventListener('submit', async (e) => {
   const headers = parseAuthHeadersValue(document.getElementById('sched-auth').value);
   const options = { effort: document.getElementById('sched-effort').value };
   if (headers && (type === 'website' || type === 'api')) options.headers = headers;
+  if (type === 'website' || type === 'api') options.vapt = document.getElementById('sched-vapt').checked;
   const payload = {
     name: document.getElementById('sched-name').value.trim() || (type + ' scan'),
     type, target,
@@ -1416,6 +1608,178 @@ async function viewSavedScan(id) {
   } catch (e) { showError('Could not load scan: ' + e.message); }
 }
 
+// ===========================================================================
+// Analytics (VART) — aggregate posture across ALL of the account's scans.
+// Everything here is fed by /api/analytics (owner-scoped, secret-masked, no
+// external calls); the export is generated entirely in the browser.
+// ===========================================================================
+let lastAnalytics = null;
+
+function anEsc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function loadAnalytics() {
+  const gate = document.getElementById('an-gate');
+  const empty = document.getElementById('an-empty');
+  const body = document.getElementById('an-body');
+  const exportBtn = document.getElementById('an-export');
+  empty.classList.add('hidden');
+  if (!isAuthed()) {
+    gate.classList.remove('hidden'); body.classList.add('hidden'); body.innerHTML = '';
+    exportBtn.hidden = true; lastAnalytics = null; return;
+  }
+  gate.classList.add('hidden');
+  body.classList.remove('hidden');
+  body.innerHTML = '<p class="hint">Loading…</p>';
+  let data;
+  try { data = await fetch('/api/analytics', { credentials: 'same-origin' }).then((r) => r.json()); }
+  catch { body.innerHTML = '<p class="hint">Could not reach the server.</p>'; return; }
+  if (!data || !data.ok) { body.innerHTML = '<p class="hint">Could not build analytics.</p>'; return; }
+  lastAnalytics = data;
+  if (data.empty) {
+    body.classList.add('hidden'); body.innerHTML = '';
+    empty.classList.remove('hidden'); exportBtn.hidden = true; return;
+  }
+  exportBtn.hidden = false;
+  renderAnalytics(data);
+}
+
+// Horizontal bar chart. rows: [{label, count, color}] — labels are trusted
+// (server-side constant names) but still escaped defensively.
+function anBars(rows, emptyMsg) {
+  if (!rows.length) return `<p class="hint">${anEsc(emptyMsg || 'Nothing to show.')}</p>`;
+  const max = Math.max(1, ...rows.map((r) => r.count));
+  return '<div class="an-bars">' + rows.map((r) =>
+    `<div class="an-bar-row">
+       <span class="an-bar-label">${anEsc(r.label)}</span>
+       <span class="an-bar-track"><span class="an-bar-fill" style="width:${(r.count / max * 100).toFixed(1)}%;background:${r.color || 'var(--accent)'}"></span></span>
+       <span class="an-bar-val">${r.count}</span>
+     </div>`).join('') + '</div>';
+}
+
+// Wider sparkline for the trend card (area + line).
+function anSparkline(trend, w, h) {
+  if (!trend || trend.length < 2) return '<p class="hint">Run more scans to build a trend.</p>';
+  w = w || 560; h = h || 90;
+  const n = trend.length;
+  const xy = trend.map((t, i) => [(i / (n - 1)) * w, h - (Math.max(0, Math.min(100, t.score)) / 100) * h]);
+  const line = xy.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  const area = `0,${h} ` + line + ` ${w},${h}`;
+  return `<svg class="an-spark" viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="none" role="img" aria-label="Score trend">
+     <polygon points="${area}" fill="var(--accent)" opacity="0.12"/>
+     <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="2"/>
+   </svg>`;
+}
+
+function renderAnalytics(d) {
+  const body = document.getElementById('an-body');
+  const t = d.totals, p = d.posture, sev = d.severity || {};
+  const critHigh = (sev.critical || 0) + (sev.high || 0);
+
+  const kpis = [
+    { label: 'Risk grade', big: p.grade, sub: p.score + ' / 100', color: gradeColor(p.score) },
+    { label: 'Open findings', big: t.open, sub: t.dismissed + ' dismissed' },
+    { label: 'Critical + High', big: critHigh, sub: (sev.critical || 0) + ' crit · ' + (sev.high || 0) + ' high', color: critHigh ? 'var(--critical)' : 'var(--accent-2)' },
+    { label: 'Scans run', big: t.scans, sub: t.targets + ' target(s)' },
+    { label: 'Projects', big: t.projects, sub: 'tracked' }
+  ];
+  const kpiHtml = '<div class="an-kpis">' + kpis.map((k) =>
+    `<div class="an-kpi"><span class="an-kpi-big" style="color:${k.color || 'var(--text)'}">${anEsc(k.big)}</span>
+       <span class="an-kpi-label">${anEsc(k.label)}</span><span class="an-kpi-sub">${anEsc(k.sub)}</span></div>`).join('') + '</div>';
+
+  const sevRows = (d.severityOrder || SEV_ORDER_DASH).filter((s) => sev[s]).map((s) =>
+    ({ label: s, count: sev[s], color: SEV_COLORS[s] }));
+  const owaspRows = (d.owaspBreakdown || []).map((o) => ({ label: `${o.code} · ${o.name}`, count: o.count, color: 'var(--accent)' }));
+  const catRows = (d.categoryBreakdown || []).map((c) => ({ label: c.label, count: c.count, color: 'var(--accent-2)' }));
+  const conf = d.confidence || {};
+  const confRows = ['high', 'medium', 'low'].filter((c) => conf[c]).map((c) =>
+    ({ label: c + ' confidence', count: conf[c], color: c === 'high' ? 'var(--high)' : c === 'medium' ? 'var(--medium)' : 'var(--low)' }));
+
+  const trendHtml = `<div class="an-card"><h3 class="an-h">Risk score over time</h3>${anSparkline(d.trend)}
+     <p class="an-note">${d.trend.length} scan(s) · latest grade <strong>${anEsc(p.grade)}</strong> (${p.score}/100)</p></div>`;
+
+  const gridHtml = `<div class="an-grid">
+     <div class="an-card"><h3 class="an-h">Open findings by severity</h3>${anBars(sevRows, 'No open findings — nice.')}</div>
+     <div class="an-card"><h3 class="an-h">OWASP Top-10 breakdown</h3>${anBars(owaspRows, 'No OWASP-mapped findings.')}</div>
+     <div class="an-card"><h3 class="an-h">Findings by category</h3>${anBars(catRows, 'No findings.')}</div>
+     <div class="an-card"><h3 class="an-h">Confidence</h3>${anBars(confRows, 'No findings.')}</div>
+   </div>`;
+
+  const projHtml = `<div class="an-card"><h3 class="an-h">Projects</h3><div class="an-proj-list">` +
+    (d.projects || []).map((pr) =>
+      `<div class="an-proj">
+         <span class="pc-grade" style="background:${gradeColor(pr.latest ? pr.latest.score : 0)}">${pr.latest ? anEsc(pr.latest.grade) : '–'}</span>
+         <span class="an-proj-name">${anEsc(pr.name)}</span>
+         <span class="an-proj-spark">${sparkline(pr.trend)}</span>
+         <span class="an-proj-open">${sevChips(pr.open)}</span>
+         <span class="an-proj-meta">${pr.scanCount} scan(s)</span>
+       </div>`).join('') + '</div></div>';
+
+  const fixHtml = `<div class="an-card"><h3 class="an-h">Top fixes by priority</h3><div class="an-fixes">` +
+    (d.topFindings || []).map((f, i) =>
+      `<div class="an-fix ${anEsc(f.severity)}">
+         <span class="an-fix-rank">${i + 1}</span>
+         <span class="f-sev ${anEsc(f.severity)}">${anEsc(f.severity)}</span>
+         <div class="an-fix-main">
+           <div class="an-fix-title">${anEsc(f.title)}</div>
+           <div class="an-fix-tags">
+             ${f.owasp ? `<span class="f-owasp">${anEsc(f.owasp)}</span>` : ''}
+             <span class="f-cat">${anEsc(CAT_ICONS[f.category] || '•')} ${anEsc(f.categoryLabel || f.category)}</span>
+             <span class="an-fix-conf">${anEsc(f.confidence || '')} confidence</span>
+             <span class="an-fix-target">${anEsc(f.target || '')}</span>
+           </div>
+           ${f.remediation ? `<div class="an-fix-fix">${anEsc(f.remediation)}</div>` : ''}
+         </div>
+       </div>`).join('') + '</div></div>';
+
+  body.innerHTML = kpiHtml + trendHtml + gridHtml + projHtml + fixHtml;
+}
+
+// Build a self-contained HTML report from the loaded analytics and download it.
+// No network is touched; the data is already secret-masked server-side.
+function exportAnalytics() {
+  const d = lastAnalytics;
+  if (!d || d.empty) return;
+  const sev = d.severity || {};
+  const row = (label, val) => `<tr><td>${anEsc(label)}</td><td>${anEsc(val)}</td></tr>`;
+  const barTable = (rows) => rows.length
+    ? '<table class="t">' + rows.map((r) => row(r.label, r.count)).join('') + '</table>'
+    : '<p>None.</p>';
+  const html =
+`<!doctype html><html><head><meta charset="utf-8"><title>SentryScan Analytics Report</title>
+<style>body{font:14px/1.5 system-ui,sans-serif;max-width:860px;margin:40px auto;padding:0 20px;color:#1a1f2e}
+h1{margin:0 0 4px}h2{margin:28px 0 8px;border-bottom:1px solid #ddd;padding-bottom:4px}
+.grade{font-size:40px;font-weight:800}.muted{color:#667}.t{border-collapse:collapse;width:100%}
+.t td{border-bottom:1px solid #eee;padding:6px 8px}.t td:last-child{text-align:right;width:80px;font-variant-numeric:tabular-nums}
+.fix{margin:10px 0;padding:10px 12px;border-left:3px solid #c33;background:#faf7f7}.fix .m{color:#556;font-size:13px}</style></head><body>
+<h1>SentryScan — Vulnerability Analytics</h1>
+<p class="muted">Generated ${anEsc(new Date(d.generatedAt).toLocaleString())} · Private report · secrets masked</p>
+<p class="grade" style="color:${gradeColor(d.posture.score)}">${anEsc(d.posture.grade)} <span style="font-size:18px" class="muted">(${d.posture.score}/100)</span></p>
+<h2>Overview</h2><table class="t">
+${row('Scans run', d.totals.scans)}${row('Projects', d.totals.projects)}${row('Targets', d.totals.targets)}
+${row('Open findings', d.totals.open)}${row('Dismissed', d.totals.dismissed)}</table>
+<h2>Open findings by severity</h2>${barTable((d.severityOrder || []).filter((s) => sev[s]).map((s) => ({ label: s, count: sev[s] })))}
+<h2>OWASP Top-10 breakdown</h2>${barTable((d.owaspBreakdown || []).map((o) => ({ label: o.code + ' ' + o.name, count: o.count })))}
+<h2>By category</h2>${barTable((d.categoryBreakdown || []).map((c) => ({ label: c.label, count: c.count })))}
+<h2>Top fixes by priority</h2>
+${(d.topFindings || []).map((f, i) => `<div class="fix"><strong>${i + 1}. [${anEsc(f.severity)}] ${anEsc(f.title)}</strong>
+<div class="m">${anEsc(f.owasp || '')} · ${anEsc(f.categoryLabel || '')} · ${anEsc(f.confidence || '')} confidence · ${anEsc(f.target || '')}</div>
+${f.remediation ? `<div class="m">Fix: ${anEsc(f.remediation)}</div>` : ''}</div>`).join('')}
+</body></html>`;
+  const blob = new Blob([html], { type: 'text/html' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'sentryscan-analytics-' + new Date().toISOString().slice(0, 10) + '.html';
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+document.getElementById('an-refresh').addEventListener('click', loadAnalytics);
+document.getElementById('an-export').addEventListener('click', exportAnalytics);
+document.querySelector('.tab[data-tab="analytics"]').addEventListener('click', loadAnalytics);
+
 document.getElementById('proj-refresh').addEventListener('click', loadProjects);
 document.querySelector('.tab[data-tab="projects"]').addEventListener('click', loadProjects);
 // Re-hydrate dismissals + refresh the dashboard whenever auth state changes.
@@ -1431,13 +1795,16 @@ document.addEventListener('sentry-auth', async () => {
   const tab = active && active.dataset.tab;
   if (tab === 'projects') loadProjects();
   else if (tab === 'schedules') loadSchedules();
+  else if (tab === 'analytics') loadAnalytics();
 });
 
 // Populate everything once the DOM is ready.
 document.querySelectorAll('.preset-chips').forEach((c) => {
-  const tabName = c.dataset.target === 'api-input' ? 'api' : 'website';
-  buildPresetChips(c, c.dataset.target === 'api-input' ? API_PRESETS : WEBSITE_PRESETS, tabName);
+  const t = c.dataset.target;
+  const tabName = t === 'api-input' ? 'api' : t === 'vapt-input' ? 'vapt' : 'website';
+  buildPresetChips(c, t === 'api-input' ? API_PRESETS : WEBSITE_PRESETS, tabName);
 });
 buildLearnContent();
+buildVaptContent();
 initProfiles();
 renderHistory();

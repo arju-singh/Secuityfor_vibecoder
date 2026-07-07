@@ -21,6 +21,10 @@ import AdmZip from 'adm-zip';
 import { isConfigured as billingConfigured, planChangeFromEvent, createCheckoutSession, createPortalSession } from '../src/billing/billing.js';
 import { putUser, setUserPlan, getUser, updateUser, findByCustomerId } from '../src/auth/store.js';
 import { runWithAuth, fetchWithTimeout } from '../src/scanners/util.js';
+import { scanVapt } from '../src/scanners/vaptScanner.js';
+import { maskSecrets, maskFinding } from '../src/analytics/mask.js';
+import { buildAnalytics } from '../src/analytics/analyticsService.js';
+import { saveScan, deleteScan } from '../src/projects/scanStore.js';
 
 let passed = 0, failed = 0;
 function assert(cond, msg) {
@@ -109,6 +113,19 @@ app.get('/secret', (req, res) => {
   if (req.get('authorization') === 'Bearer good-token') return res.json({ secret: 'flag{authenticated}' });
   res.status(401).json({ error: 'unauthorized' });
 });
+
+// VAPT surface: reflects an attacker Host header + arbitrary Origin (with
+// credentials), sets an insecure session cookie, and leaks a JWT with alg:none.
+app.get('/vapt', (req, res) => {
+  const origin = req.get('origin');
+  if (origin) { res.set('Access-Control-Allow-Origin', origin); res.set('Access-Control-Allow-Credentials', 'true'); }
+  res.set('Set-Cookie', 'sessionid=abc123; SameSite=None; Path=/');
+  const xfh = req.get('x-forwarded-host') || 'default';
+  const jwt = 'eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiIxIn0.';
+  res.type('html').send(`<html><body>Welcome. host=${xfh} token=${jwt}</body></html>`);
+});
+app.get('/admin', (req, res) => res.type('html').send('<h1>Admin panel</h1><p>internal</p>'));
+app.get('/.aws/credentials', (req, res) => res.type('text').send('aws_access_key_id=AKIAIOSFODNN7EXAMPLE\naws_secret_access_key=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY'));
 
 const server = app.listen(0);
 await new Promise((r) => server.once('listening', r));
@@ -377,6 +394,52 @@ try {
   assert(validateBody(resetSchema, { token: 't' }).ok === false, 'reset requires a password');
   assert(validateBody(resetSchema, { token: 't', password: 'short' }).ok === false, 'reset rejects passwords under 8 chars');
   assert(validateBody(resetSchema, { token: 't', password: 'longenough' }).ok === true, 'reset accepts token + valid password');
+
+  // --- 11) VAPT active pen-test scanner ------------------------------------
+  console.log('\n[11] VAPT scanner against the deliberately-weak /vapt surface:');
+  const vapt = await scanVapt(`${base}/vapt`, { effort: 'regular' });
+  const vt = vapt.findings.map((f) => f.title).join(' | ');
+  assert(vapt.type === 'vapt', 'vapt scanner returns type "vapt"');
+  assert(/Host header injection/i.test(vt), 'vapt detects reflected forwarding-header (host header injection)');
+  assert(/CORS reflects arbitrary Origin with credentials/i.test(vt), 'vapt detects CORS credential exposure');
+  assert(/JWT accepts "alg: none"/i.test(vt), 'vapt detects a JWT with alg:none');
+  assert(/SameSite=None without Secure/i.test(vt), 'vapt detects an insecure session cookie');
+  assert(/Exposed sensitive resource|Reachable sensitive path/i.test(vt), 'vapt enumerates an exposed sensitive path');
+  const jwtFinding = vapt.findings.find((f) => /JWT/i.test(f.title));
+  assert(jwtFinding && !/eyJzdWIiOiIxIn0/.test(JSON.stringify(jwtFinding)), 'vapt masks the raw JWT value in evidence');
+
+  // --- 12) Secret masking --------------------------------------------------
+  console.log('\n[12] Analytics secret masking:');
+  assert(maskSecrets('t eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.abcdef123456 x').includes('[REDACTED JWT]'), 'mask redacts JWTs');
+  assert(maskSecrets('use AKIAIOSFODNN7EXAMPLE now').includes('[REDACTED AWS key id]'), 'mask redacts AWS key ids');
+  assert(maskSecrets('password=SuperSecret123!').includes('[REDACTED]'), 'mask redacts password= values');
+  assert(maskSecrets('A normal remediation sentence about headers.') === 'A normal remediation sentence about headers.', 'mask leaves ordinary prose intact');
+  const mf = maskFinding({ severity: 'high', category: 'vapt', title: 'x', evidence: 'AKIAIOSFODNN7EXAMPLE' });
+  assert(mf.evidence.includes('[REDACTED') && mf.severity === 'high' && mf.category === 'vapt', 'maskFinding masks evidence but keeps structural fields');
+
+  // --- 13) Analytics aggregation (VART) ------------------------------------
+  console.log('\n[13] Analytics aggregation across saved scans:');
+  const anEmail = `vart-test-${Date.now()}@example.test`;
+  assert(buildAnalytics(anEmail).empty === true, 'analytics reports empty for a user with no scans');
+  const findingsA = [
+    { severity: 'high', category: 'vuln', title: 'Reflected XSS', owasp: 'A03:2021 Injection', confidence: 'high', evidence: 'AKIAIOSFODNN7EXAMPLE', location: '/x', impact: 'i', remediation: 'encode output' },
+    { severity: 'medium', category: 'security', title: 'Missing HSTS', owasp: 'A05:2021 Security Misconfiguration', confidence: 'medium', location: '/', remediation: 'add HSTS' }
+  ];
+  const repBase = { ok: true, type: 'website', total: 2, meta: { target: 'https://a.example.test' }, categories: [], findings: findingsA };
+  const sc1 = saveScan(anEmail, 'Default', { ...repBase, score: 70, grade: 'C', counts: { critical: 0, high: 1, medium: 1, low: 0, info: 0 } });
+  const sc2 = saveScan(anEmail, 'Default', { ...repBase, score: 85, grade: 'B', counts: { critical: 0, high: 1, medium: 1, low: 0, info: 0 } });
+  try {
+    const an = buildAnalytics(anEmail);
+    assert(an.ok && !an.empty, 'analytics builds for a user with saved scans');
+    assert(an.totals.scans === 2, 'analytics counts every saved scan');
+    assert(an.totals.open >= 1 && an.posture && typeof an.posture.score === 'number', 'analytics computes open findings + a posture score');
+    assert(an.owaspBreakdown.some((o) => o.code === 'A03'), 'analytics builds an OWASP Top-10 breakdown');
+    assert(an.trend.length === 2, 'analytics builds a score trend across scans');
+    assert(an.topFindings.length >= 1 && an.topFindings.every((f) => !/AKIAIOSFODNN7EXAMPLE/.test(JSON.stringify(f))), 'analytics masks secrets in the ranked top-findings list');
+  } finally {
+    deleteScan(sc1.id); deleteScan(sc2.id);
+  }
+  assert(buildAnalytics(anEmail).empty === true, 'analytics cleanup left no residual test scans');
 
   // Optional-integration guards (off by default in tests)
   assert(isEmailConfigured() === false, 'email reports not-configured without RESEND_API_KEY');

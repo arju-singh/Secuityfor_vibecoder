@@ -15,16 +15,18 @@ import { listSchedules, getSchedule, putSchedule, patchSchedule, deleteSchedule,
 import { saveScan, getScan, deleteScan, listScans, listProjectNames, summaryOf } from './src/projects/scanStore.js';
 import { getDismissals, setDismissal, clearDismissal } from './src/projects/dismissalStore.js';
 import { findingFingerprint } from './src/projects/fingerprint.js';
+import { buildAnalytics } from './src/analytics/analyticsService.js';
 import { scanApiFuzz } from './src/scanners/apiFuzzScanner.js';
 import { scanAccess } from './src/scanners/accessScanner.js';
 import { scanApiSpec } from './src/scanners/apiSpecScanner.js';
+import { scanVapt } from './src/scanners/vaptScanner.js';
 import { scanAudits } from './src/scanners/auditScanner.js';
 import { scoreFindings, summarize } from './src/scanners/scoring.js';
 import { normalizeUrl, runWithAuth, enrichFinding, fetchWithTimeout } from './src/scanners/util.js';
 import cookieParser from 'cookie-parser';
 import { securityHeaders } from './src/middleware/security.js';
 import { rateLimit, clientKey } from './src/middleware/rateLimit.js';
-import { validate, websiteSchema, apiSchema, credentialsSchema, githubSchema, billingSchema, forgotSchema, resetSchema } from './src/middleware/validate.js';
+import { validate, websiteSchema, apiSchema, credentialsSchema, githubSchema, vaptSchema, billingSchema, forgotSchema, resetSchema } from './src/middleware/validate.js';
 import { hashPassword, verifyPassword, issueToken, verifyToken, signScoped, verifyScoped, setAuthCookie, clearAuthCookie, requireAuth } from './src/auth/auth.js';
 import { getUser, hasUser, putUser, setUserPlan, updateUser, findByCustomerId } from './src/auth/store.js';
 import { checkLock, recordFailure, recordSuccess } from './src/auth/bruteforce.js';
@@ -47,6 +49,10 @@ if (process.env.TRUST_PROXY) {
 
 app.use(securityHeaders);                                   // OWASP secure headers on every response
 app.use(express.static(path.join(__dirname, 'public')));
+// Client-routed pages (Coverage / VAPT / How it works / Why us / Pricing / FAQ):
+// serve the single-page app so deep links and refreshes resolve to the router.
+app.get(['/coverage', '/vapt', '/how-it-works', '/why-us', '/pricing', '/faq', '/methodology'], (req, res) =>
+  res.sendFile(path.join(__dirname, 'public', 'index.html')));
 // Parse JSON for everything EXCEPT the Stripe webhook, which needs the raw body
 // to verify its signature.
 const jsonParser = express.json({ limit: '1mb' });
@@ -409,7 +415,7 @@ async function auditSections(target) {
 // routes AND the scheduler (/api/schedule/run) execute scans identically. They
 // return a finished report object or throw an Error (with an optional `.status`).
 
-async function performWebsiteScan({ url, render = true, audits = true, effort = 'extended', headers } = {}) {
+async function performWebsiteScan({ url, render = true, audits = true, vapt = false, effort = 'extended', headers } = {}) {
   normalizeUrl(url); // throws on invalid / blocked (SSRF) target → mapped to 400
   const authHeaders = sanitizeHeaders(headers);
   const authed = Object.keys(authHeaders).length > 0;
@@ -418,6 +424,7 @@ async function performWebsiteScan({ url, render = true, audits = true, effort = 
     runSection('security', 'Security', () => scanUrl(url)),
     runSection('vuln', 'Vulnerabilities & OWASP', () => scanVuln(url, { effort })),
     ...(render ? [runSection('render', 'JavaScript & render', () => scanRender(url, { authHeaders }), RENDER_TIMEOUT_MS)] : []),
+    ...(vapt ? [runSection('vapt', 'Active pen-test (VAPT)', () => scanVapt(url, { effort }))] : []),
     ...(audits ? [auditSections(url)] : [])
   ]));
   const sections = results.flat(); // auditSections returns an array of 3
@@ -431,7 +438,7 @@ async function performWebsiteScan({ url, render = true, audits = true, effort = 
   return buildReport('website', sections, { target: url, authenticated: authed, effort, finalUrl: finalUrl ? finalUrl.meta.finalUrl : url });
 }
 
-async function performApiScan({ url, headers, fuzz = false, access = true, enumerate = false, method, body, contentType, allowWrite = false, rateLimit = false, customPayloads } = {}) {
+async function performApiScan({ url, headers, fuzz = false, access = true, enumerate = false, vapt = false, method, body, contentType, allowWrite = false, rateLimit = false, customPayloads } = {}) {
   normalizeUrl(url);
   const authHeaders = sanitizeHeaders(headers);
   const authed = Object.keys(authHeaders).length > 0;
@@ -440,11 +447,42 @@ async function performApiScan({ url, headers, fuzz = false, access = true, enume
     runSection('api', 'API endpoint', () => scanApi(url)),
     ...(access ? [runSection('access', 'Access control & IDOR', () => scanAccess(url, fuzzOpts))] : []),
     ...(enumerate ? [runSection('spec', 'API surface (OpenAPI)', () => scanApiSpec(url))] : []),
+    ...(vapt ? [runSection('vapt', 'Active pen-test (VAPT)', () => scanVapt(url, fuzzOpts))] : []),
     ...(fuzz ? [runSection('fuzz', 'Parameter fuzzing', () => scanApiFuzz(url, fuzzOpts))] : [])
   ]));
   const apiSection = sections.find((s) => s.category === 'api');
   if (apiSection && apiSection.error) { const e = new Error(apiSection.error); e.status = 400; throw e; }
   return buildReport('api', sections, { target: url, authenticated: authed, fuzzed: fuzz });
+}
+
+// Full VAPT assessment: the entire black-box battery against a single target —
+// recon/health, security posture, OWASP vuln probes, the active pen-test engine,
+// access-control, API checks + surface enumeration + injection fuzzing, and a
+// headless render. allowWrite unlocks the state-changing probes (brute-force,
+// race, write-fuzz). One combined, OWASP-mapped report. Reused by route +
+// (potentially) scheduler, same as the other perform* runners.
+async function performVaptScan({ url, headers, effort = 'extended', allowWrite = false } = {}) {
+  normalizeUrl(url); // throws on invalid / blocked (SSRF) target → mapped to 400
+  const authHeaders = sanitizeHeaders(headers);
+  const authed = Object.keys(authHeaders).length > 0;
+  const fuzzOpts = { method: 'GET', allowWrite, rateLimit: allowWrite };
+  const results = await runWithAuth(authHeaders, () => Promise.all([
+    runSection('ui', 'Recon & health', () => scanUi(url)),
+    runSection('security', 'Security headers, TLS & exposure', () => scanUrl(url)),
+    runSection('vuln', 'Vulnerabilities & OWASP', () => scanVuln(url, { effort })),
+    runSection('vapt', 'Active pen-test (VAPT)', () => scanVapt(url, { effort, allowWrite, method: 'GET' })),
+    runSection('access', 'Access control & IDOR', () => scanAccess(url, fuzzOpts)),
+    runSection('api', 'API endpoint', () => scanApi(url)),
+    runSection('spec', 'API surface (OpenAPI)', () => scanApiSpec(url)),
+    runSection('fuzz', 'Injection & input fuzzing', () => scanApiFuzz(url, fuzzOpts)),
+    runSection('render', 'JavaScript & render', () => scanRender(url, { authHeaders }), RENDER_TIMEOUT_MS)
+  ]));
+  const networkSections = results.filter((s) => s.category !== 'render');
+  if (networkSections.length && networkSections.every((s) => s.error)) {
+    const e = new Error(networkSections[0].error); e.status = 400; throw e;
+  }
+  const finalUrl = results.find((s) => s.meta && s.meta.finalUrl);
+  return buildReport('vapt', results, { target: url, authenticated: authed, effort, mode: 'vapt', finalUrl: finalUrl ? finalUrl.meta.finalUrl : url });
 }
 
 async function performGithubScan({ url, effort = 'extended', paths } = {}) {
@@ -475,7 +513,7 @@ function persistScan(req, report) {
 app.post('/api/test/website', gate, scanLimiter, validate(websiteSchema), async (req, res) => {
   try {
     const report = await performWebsiteScan({
-      url: req.body.url, render: req.body.render, audits: req.body.audits,
+      url: req.body.url, render: req.body.render, audits: req.body.audits, vapt: req.body.vapt,
       effort: req.body.effort, headers: req.body.headers
     });
     res.json(persistScan(req, report));
@@ -489,9 +527,24 @@ app.post('/api/test/api', gate, scanLimiter, validate(apiSchema), async (req, re
   try {
     const report = await performApiScan({
       url: req.body.url, headers: req.body.headers, fuzz: req.body.fuzz, access: req.body.access,
-      enumerate: req.body.enumerate, method: req.body.method, body: req.body.body,
+      enumerate: req.body.enumerate, vapt: req.body.vapt, method: req.body.method, body: req.body.body,
       contentType: req.body.contentType, allowWrite: req.body.allowWrite,
       rateLimit: req.body.rateLimit, customPayloads: req.body.customPayloads
+    });
+    res.json(persistScan(req, report));
+  } catch (e) {
+    res.status(e.status || 400).json({ ok: false, error: e.message });
+  }
+});
+
+// --- Full VAPT assessment --------------------------------------------------
+// Runs the entire scanner battery against one target and returns one combined,
+// OWASP-mapped report. allowWrite unlocks the state-changing probes.
+app.post('/api/test/vapt', gate, scanLimiter, validate(vaptSchema), async (req, res) => {
+  try {
+    const report = await performVaptScan({
+      url: req.body.url, headers: req.body.headers,
+      effort: req.body.effort, allowWrite: req.body.allowWrite
     });
     res.json(persistScan(req, report));
   } catch (e) {
@@ -817,6 +870,17 @@ app.delete('/api/scans/:id', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// Aggregate analytics ("VART") across all of the signed-in user's saved scans.
+// Owner-scoped and auth-only (never a public/shareable URL); computed purely from
+// stored data with no external calls; every finding it returns is secret-masked.
+app.get('/api/analytics', requireAuth, (req, res) => {
+  try {
+    res.json(buildAnalytics(req.user.email));
+  } catch (e) {
+    res.status(500).json({ ok: false, error: 'Could not build analytics.' });
+  }
+});
+
 // Per-account finding dismissals (sync across devices; apply to every scan).
 app.get('/api/dismissals', requireAuth, (req, res) => {
   res.json({ ok: true, dismissals: getDismissals(req.user.email) });
@@ -871,10 +935,12 @@ function buildScheduleFromBody(body, ownerEmail, existing) {
   if (type === 'website') {
     options.render = o.render !== false;
     options.audits = o.audits !== false;
+    options.vapt = !!o.vapt;
     options.effort = o.effort === 'regular' ? 'regular' : 'extended';
   } else if (type === 'api') {
     options.fuzz = !!o.fuzz; options.access = o.access !== false;
     options.enumerate = !!o.enumerate; options.rateLimit = !!o.rateLimit;
+    options.vapt = !!o.vapt;
   } else if (type === 'github') {
     options.effort = o.effort === 'regular' ? 'regular' : 'extended';
     options.paths = Array.isArray(o.paths) ? o.paths.filter((p) => typeof p === 'string').slice(0, 50) : [];

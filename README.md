@@ -42,9 +42,10 @@ The server listens on `PORT` (default `3000`).
 ## How it works
 
 - **Backend** (`server.js` + `src/scanners/`): Express API.
-  - `POST /api/test/website` — `{ "url": "example.com", "render": true }` (UI + security + render)
-  - `POST /api/test/api` — `{ "url": "https://api.example.com/endpoint" }`
+  - `POST /api/test/website` — `{ "url": "example.com", "render": true, "vapt": false }` (UI + security + render; opt-in active pen-test)
+  - `POST /api/test/api` — `{ "url": "https://api.example.com/endpoint", "vapt": false }`
   - `POST /api/scan/files` — multipart upload (`.zip` or loose files)
+  - `GET /api/analytics` — account-private aggregate analytics across all of the signed-in user's saved scans (secret-masked; no external calls)
 - **Frontend** (`public/`): single-page UI with a score gauge, per-category summary cards, severity + category filters, and per-finding remediation.
 
 ### Scanner modules
@@ -55,6 +56,8 @@ The server listens on `PORT` (default `3000`).
 | `src/scanners/apiScanner.js` | API: status, timing, JSON validity, CORS, methods, auth, HTTPS |
 | `src/scanners/urlScanner.js` | Security: headers, TLS, cookies, CORS, exposed paths, mixed content |
 | `src/scanners/renderScanner.js` | Headless Chromium: console/JS errors, failed requests, render check |
+| `src/scanners/vaptScanner.js` | Opt-in active pen-test: host-header injection, CORS credential exposure, JWT/cookie weaknesses, surface enumeration, cache deception, verb tampering, brute-force resistance |
+| `src/analytics/analyticsService.js` | Account-private aggregate analytics (posture, trend, OWASP/category breakdowns, ranked fixes) with `mask.js` secret redaction |
 | `src/scanners/codeScanner.js` | Secret detection, dangerous patterns, sensitive files, OSV dependency lookups |
 | `src/scanners/patterns.js` | Secret regex rules, code-pattern rules, sensitive-file rules |
 | `src/scanners/util.js` | URL normalization + SSRF guard, fetch-with-timeout, finding helper |
