@@ -69,6 +69,9 @@
     <a class="nav-cta" href="#scanner">Run a scan</a>
   </header>
 
+  <!-- Plan-expiry reminder (shown by auth.js when a paid plan is within 7 days of lapsing) -->
+  <div class="plan-reminder" id="plan-reminder" role="status" hidden></div>
+
   <!-- Auth modal -->
   <div class="auth-modal" id="auth-modal" hidden>
     <div class="auth-backdrop" data-auth-close></div>
@@ -847,6 +850,7 @@
         </article>
       </div>
       <p class="price-note">Prices in INR, billed monthly, processed securely via <strong>Razorpay</strong> (UPI / cards / netbanking). Card details never touch our servers. Cancel anytime — your plan runs to the end of the paid period.</p>
+      <p class="price-note billing-off" id="billing-off-note" hidden>⚙️ Online payments are being set up — checkout is temporarily unavailable. Please check back shortly.</p>
     </section>
 
     <!-- FAQ -->

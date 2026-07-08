@@ -147,6 +147,29 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; }
   box-shadow: 0 6px 16px -8px rgba(91, 139, 255, 0.9);
 }
 
+/* Plan-expiry reminder banner */
+.plan-reminder {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 10px auto 0; max-width: 1200px; padding: 9px 16px;
+  border-radius: 12px; font-size: 13.5px; font-weight: 500;
+  color: #ffe9c2; border: 1px solid rgba(255, 176, 32, 0.35);
+  background: rgba(255, 176, 32, 0.10);
+}
+.plan-reminder .pr-renew {
+  padding: 4px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 700;
+  color: #fff; background: var(--grad); border: none; cursor: pointer;
+}
+.plan-reminder .pr-renew:hover { filter: brightness(1.08); }
+.plan-reminder .pr-x {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  color: inherit; font-size: 18px; line-height: 1; opacity: .7;
+}
+.plan-reminder .pr-x:hover { opacity: 1; }
+
+/* Disabled pricing CTA when billing isn't configured on the server */
+.price-cta.is-disabled { opacity: .45; pointer-events: none; cursor: not-allowed; }
+.price-note.billing-off { color: #ffcf8f; }
+
 /* ============================================================================
    Layout
    ========================================================================== */

@@ -15,6 +15,8 @@
   const logoutBtn = $('nav-logout');
   const billingBtn = $('nav-billing');
   const planBadge = $('nav-plan');
+  const planReminder = $('plan-reminder');
+  const billingOffNote = $('billing-off-note');
   const form = $('auth-form');
   const emailInput = $('auth-email');
   const pwInput = $('auth-password');
@@ -67,8 +69,10 @@
     const paid = currentUser && currentUser.plan && currentUser.plan !== 'free';
     if (billingBtn) billingBtn.hidden = !(cfg.billingEnabled && paid);
     renderPlanBadge();
+    renderPlanReminder();
+    applyBillingButtons();
   }
-  // Small header pill: "Pro · renews 7 Aug" for a paid plan, "Free" otherwise.
+  // Small header pill: "Pro · until 7 Aug" for a paid plan, "Free" otherwise.
   function renderPlanBadge() {
     if (!planBadge) return;
     if (!currentUser) { planBadge.hidden = true; return; }
@@ -77,13 +81,45 @@
     let text = nice;
     if (plan !== 'free' && currentUser.planExpiresAt) {
       const d = new Date(currentUser.planExpiresAt);
-      if (!isNaN(d)) text += ' · renews ' + d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+      if (!isNaN(d)) text += ' · until ' + d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
     }
     planBadge.textContent = text;
     planBadge.classList.toggle('is-paid', plan !== 'free');
     planBadge.title = plan === 'free' ? 'Free plan — upgrade to unlock VAPT, GitHub scans, analytics and more.'
       : `${nice} plan${currentUser.planExpiresAt ? ' · active until ' + new Date(currentUser.planExpiresAt).toLocaleDateString() : ''}`;
     planBadge.hidden = false;
+  }
+  // Banner nudging a paid user to renew when their plan lapses within 7 days.
+  // (One-time model: the plan ends on planExpiresAt unless they buy again.)
+  function renderPlanReminder() {
+    if (!planReminder) return;
+    const u = currentUser;
+    if (!u || !u.plan || u.plan === 'free' || !u.planExpiresAt) { planReminder.hidden = true; return; }
+    const days = Math.ceil((new Date(u.planExpiresAt) - Date.now()) / 86400000);
+    if (isNaN(days) || days < 0 || days > 7) { planReminder.hidden = true; return; }
+    // Dismissible per-expiry, per-session (re-nudges next visit / after renewal).
+    try { if (sessionStorage.getItem('ss-reminder-dismissed') === u.planExpiresAt) { planReminder.hidden = true; return; } } catch { /* noop */ }
+    const nice = u.plan.charAt(0).toUpperCase() + u.plan.slice(1);
+    const msg = days <= 0 ? `Your ${nice} plan expires today.` : `Your ${nice} plan expires in ${days} day${days === 1 ? '' : 's'} — renew to keep premium features.`;
+    planReminder.textContent = '';
+    const span = document.createElement('span'); span.textContent = '⏳ ' + msg;
+    const renew = document.createElement('button'); renew.type = 'button'; renew.className = 'pr-renew'; renew.textContent = 'Renew';
+    renew.addEventListener('click', () => { const el = document.getElementById('pricing'); if (el) el.scrollIntoView({ behavior: 'smooth' }); });
+    const x = document.createElement('button'); x.type = 'button'; x.className = 'pr-x'; x.setAttribute('aria-label', 'Dismiss'); x.textContent = '×';
+    x.addEventListener('click', () => { try { sessionStorage.setItem('ss-reminder-dismissed', u.planExpiresAt); } catch { /* noop */ } planReminder.hidden = true; });
+    planReminder.append(span, renew, x);
+    planReminder.hidden = false;
+  }
+  // Disable the pricing CTAs (they're <a>, so we gate via class + a handler guard)
+  // and surface a note when the server reports billing isn't configured.
+  function applyBillingButtons() {
+    const off = cfg && cfg.billingEnabled === false;
+    document.querySelectorAll('.price-cta[data-plan]').forEach((btn) => {
+      btn.classList.toggle('is-disabled', off);
+      if (off) btn.setAttribute('aria-disabled', 'true'); else btn.removeAttribute('aria-disabled');
+      btn.title = off ? 'Online payments are being set up — checkout is temporarily unavailable.' : '';
+    });
+    if (billingOffNote) billingOffNote.hidden = !off;
   }
   function signedIn(user) {
     currentUser = user;
@@ -98,6 +134,7 @@
     if (account) account.hidden = true;
     if (billingBtn) billingBtn.hidden = true;
     if (planBadge) planBadge.hidden = true;
+    if (planReminder) planReminder.hidden = true;
     publishAuth(null);
   }
 
@@ -182,6 +219,10 @@
   document.querySelectorAll('.price-cta[data-plan]').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
+      if (btn.classList.contains('is-disabled') || cfg.billingEnabled === false) {
+        alert('Online payments are being set up — checkout is temporarily unavailable. Please check back shortly.');
+        return;
+      }
       const plan = btn.dataset.plan;
       const sess = await fetch('/api/auth/session', { credentials: 'same-origin' }).then((r) => r.json()).catch(() => ({}));
       if (!sess.authenticated) { setMode('register'); openModal(); return; }
