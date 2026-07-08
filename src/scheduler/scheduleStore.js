@@ -2,7 +2,7 @@
 // store's pattern. Single-node; swap for a real DB to scale. The data directory
 // is gitignored and the file is written 0600 because a schedule MAY carry auth
 // headers for authenticated scans.
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,7 +15,9 @@ function load() {
 }
 function save(map) {
   if (!existsSync(DIR)) mkdirSync(DIR, { recursive: true });
-  writeFileSync(FILE, JSON.stringify(map, null, 2), { mode: 0o600 });
+  const tmp = `${FILE}.${process.pid}.tmp`; // atomic write — see other stores
+  writeFileSync(tmp, JSON.stringify(map, null, 2), { mode: 0o600 });
+  renameSync(tmp, FILE);
 }
 
 const norm = (email) => String(email || '').trim().toLowerCase();

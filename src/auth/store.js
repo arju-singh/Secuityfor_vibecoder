@@ -1,7 +1,7 @@
 // Minimal persistent user store (JSON file). Stores only email + bcrypt hash —
 // never plaintext passwords. Single-node; swap for a real DB to scale.
 // The data directory is gitignored so credentials never enter version control.
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -14,7 +14,11 @@ function load() {
 }
 function save(users) {
   if (!existsSync(DIR)) mkdirSync(DIR, { recursive: true });
-  writeFileSync(FILE, JSON.stringify(users, null, 2), { mode: 0o600 });
+  // Atomic write (temp + rename) so a crash mid-write can't truncate the user
+  // store and wipe every account on the next load.
+  const tmp = `${FILE}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(users, null, 2), { mode: 0o600 });
+  renameSync(tmp, FILE);
 }
 
 const norm = (email) => String(email || '').trim().toLowerCase();

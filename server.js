@@ -12,7 +12,7 @@ import { scanCode, entriesFromZip, scopeEntries } from './src/scanners/codeScann
 import { scanCodeAudit } from './src/scanners/codeAuditScanner.js';
 import { fetchRepoEntries, parseRepoUrl } from './src/scanners/githubScanner.js';
 import { listSchedules, getSchedule, putSchedule, patchSchedule, deleteSchedule, CADENCE_MS } from './src/scheduler/scheduleStore.js';
-import { saveScan, getScan, deleteScan, listScans, listProjectNames, summaryOf } from './src/projects/scanStore.js';
+import { saveScan, getScan, deleteScan, listScans, summaryOf } from './src/projects/scanStore.js';
 import { getDismissals, setDismissal, clearDismissal } from './src/projects/dismissalStore.js';
 import { findingFingerprint } from './src/projects/fingerprint.js';
 import { buildAnalytics } from './src/analytics/analyticsService.js';
@@ -605,7 +605,11 @@ app.post('/api/scan/files', gate, fileLimiter, upload.any(), async (req, res) =>
     const report = buildReport('code', sections, { files: entries.length, effort, scopedFrom: total, scope: paths.length ? paths : undefined });
     res.json(persistScan(req, report));
   } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
+    // Deliberate, user-facing errors carry an explicit .status; anything else is
+    // an unexpected internal failure whose message we must not leak to the client.
+    if (e.status) return res.status(e.status).json({ ok: false, error: e.message });
+    console.error('[scan/files]', e);
+    res.status(500).json({ ok: false, error: 'The scan could not be completed. Please try again.' });
   }
 });
 
@@ -1081,7 +1085,8 @@ app.post('/api/schedule/run', async (req, res) => {
     const result = await runDueSchedules({ id: req.body?.id || null, force: !!req.body?.force });
     res.json({ ok: true, ...result });
   } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
+    console.error('[schedule/run]', e);
+    res.status(500).json({ ok: false, error: 'Scheduled run failed.' });
   }
 });
 

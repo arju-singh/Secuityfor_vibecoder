@@ -1,7 +1,7 @@
 // Per-account finding dismissals (JSON file). Keyed by owner then by finding
 // fingerprint so a dismissal applies across every scan that surfaces the same
 // issue, and syncs across the user's devices (unlike the browser-local fallback).
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -14,7 +14,9 @@ function load() {
 }
 function save(map) {
   if (!existsSync(DIR)) mkdirSync(DIR, { recursive: true });
-  writeFileSync(FILE, JSON.stringify(map, null, 2), { mode: 0o600 });
+  const tmp = `${FILE}.${process.pid}.tmp`; // atomic write — see other stores
+  writeFileSync(tmp, JSON.stringify(map, null, 2), { mode: 0o600 });
+  renameSync(tmp, FILE);
 }
 
 const norm = (email) => String(email || '').trim().toLowerCase();

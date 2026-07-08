@@ -5,6 +5,10 @@ import { SECRET_RULES, CODE_RULES, SENSITIVE_FILES, SCANNABLE_EXT, extOf } from 
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024; // skip files larger than 2 MB for line scanning
 const MAX_FILES = 5000;
+// Zip-bomb guards: cap any single decompressed entry and the total decompressed
+// volume so a small malicious archive can't inflate to gigabytes and OOM us.
+const MAX_ENTRY_BYTES = 10 * 1024 * 1024;   // 10 MB per extracted file
+const MAX_TOTAL_BYTES = 200 * 1024 * 1024;  // 200 MB total across the archive
 
 function finding(severity, title, description, remediation, evidence, location) {
   return { severity, title, description, remediation, evidence: evidence || null, location: location || null };
@@ -46,12 +50,23 @@ function isBinary(buf) {
 export function entriesFromZip(buffer) {
   const zip = new AdmZip(buffer);
   const out = [];
+  let total = 0;
   for (const e of zip.getEntries()) {
     if (e.isDirectory) continue;
     if (out.length >= MAX_FILES) break;
     // Skip dependency/build dirs that are not the user's own code.
     if (/(^|\/)(node_modules|\.next|dist|build|vendor|bower_components)\//i.test(e.entryName)) continue;
-    out.push({ path: e.entryName, buffer: e.getData() });
+    // Reject a decompressed entry that is implausibly large (zip bomb) using the
+    // header's declared size BEFORE inflating it, and stop once the running total
+    // would exceed the archive cap. header.size is the uncompressed byte length.
+    const declared = e.header && e.header.size;
+    if (typeof declared === 'number' && declared > MAX_ENTRY_BYTES) continue;
+    if (total + (declared || 0) > MAX_TOTAL_BYTES) break;
+    const data = e.getData();
+    total += data.length;
+    if (data.length > MAX_ENTRY_BYTES) continue; // guard against a lying header
+    if (total > MAX_TOTAL_BYTES) break;
+    out.push({ path: e.entryName, buffer: data });
   }
   return out;
 }

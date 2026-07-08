@@ -7,14 +7,14 @@
   <meta name="theme-color" content="#05070e" />
 
   <!-- Canonical -->
-  <link rel="canonical" href="https://YOUR-DOMAIN.example/" />
+  <link rel="canonical" href="https://sentryscan.onrender.com/" />
 
   <!-- Open Graph -->
   <meta property="og:type" content="website" />
   <meta property="og:title" content="SentryScan — Premium Web Security Scanner" />
   <meta property="og:description" content="SentryScan — a premium, non-intrusive security scanner for any website, API, or codebase. UI · API · security · render testing with OWASP-mapped findings." />
-  <meta property="og:url" content="https://YOUR-DOMAIN.example/" />
-  <meta property="og:image" content="https://YOUR-DOMAIN.example/favicon.svg" />
+  <meta property="og:url" content="https://sentryscan.onrender.com/" />
+  <meta property="og:image" content="https://sentryscan.onrender.com/favicon.svg" />
   <meta property="og:site_name" content="SentryScan" />
 
   <!-- Twitter -->
@@ -109,7 +109,7 @@
           <div class="stat"><dt data-count="19">19</dt><dd>diagnostic areas</dd></div>
           <div class="stat"><dt data-count="150" data-suffix="+">150+</dt><dd>automated checks</dd></div>
           <div class="stat"><dt data-count="11">11</dt><dd>scanner engines</dd></div>
-          <div class="stat"><dt data-count="0">0</dt><dd>results stored server-side</dd></div>
+          <div class="stat"><dt data-count="0">0</dt><dd>raw files kept after a scan</dd></div>
         </dl>
         <div class="trust-strip reveal" aria-label="Integrated industry tools">
           <span class="trust-label">Integrates</span>
@@ -730,7 +730,7 @@
             <tr><td>Secret &amp; dependency scanning</td><td><i class="x">—</i></td><td><i class="c">✓</i></td><td class="cmp-us"><i class="c">✓</i></td></tr>
             <tr><td>Copy-paste repro &amp; concrete fixes</td><td><i class="p">manual</i></td><td><i class="x">—</i></td><td class="cmp-us"><i class="c">✓</i></td></tr>
             <tr><td>Results in seconds</td><td><i class="x">—</i></td><td><i class="c">✓</i></td><td class="cmp-us"><i class="c">✓</i></td></tr>
-            <tr><td>Nothing stored server-side</td><td><i class="c">✓</i></td><td><i class="x">varies</i></td><td class="cmp-us"><i class="c">✓</i></td></tr>
+            <tr><td>Raw code discarded after scan</td><td><i class="c">✓</i></td><td><i class="x">varies</i></td><td class="cmp-us"><i class="c">✓</i></td></tr>
           </tbody>
         </table>
       </div>
@@ -743,7 +743,7 @@
       <div class="trust-grid">
         <div class="trust-item"><span class="ti-ico">🛡️</span><b>Non-intrusive</b><span>Loads pages like a browser. Never attempts an exploit or destructive action.</span></div>
         <div class="trust-item"><span class="ti-ico">🚫</span><b>No private targets</b><span>Scans of localhost and private networks are blocked outright.</span></div>
-        <div class="trust-item"><span class="ti-ico">🗑️</span><b>Nothing stored</b><span>No results saved server-side. History lives only in your browser.</span></div>
+        <div class="trust-item"><span class="ti-ico">🗑️</span><b>Raw code discarded</b><span>Uploaded files are analyzed in memory and never written to disk. Saved reports have secrets masked, and you can delete them anytime.</span></div>
         <div class="trust-item"><span class="ti-ico">📡</span><b>Minimal egress</b><span>Only contacts public OSV.dev to check dependency versions.</span></div>
       </div>
     </section>
@@ -836,7 +836,7 @@
           <a class="price-cta" href="#scanner" data-plan="team">Get Team</a>
         </article>
       </div>
-      <p class="price-note">The open-source core is free forever. Hosted tiers shown are illustrative — no billing is wired into this build.</p>
+      <p class="price-note">The open-source core is free forever. Paid tiers are processed securely via Stripe when billing is enabled on this deployment.</p>
     </section>
 
     <!-- FAQ -->
@@ -857,7 +857,7 @@
         </details>
         <details class="faq-item" name="faq">
           <summary>Where do my results and credentials go? <span class="faq-chev" aria-hidden="true"></span></summary>
-          <div class="faq-a"><p>Nothing is stored server-side. Scan history lives only in your own browser, and any auth headers you supply are used for that single scan and never persisted. The only outbound call is to the public <a href="https://osv.dev" target="_blank" rel="noopener noreferrer">OSV.dev</a> database to check dependency versions.</p></div>
+          <div class="faq-a"><p>The raw code and files you submit are analyzed in memory and <strong>never written to our disk</strong> — they’re discarded as soon as the scan finishes. When you’re signed in, the resulting <em>findings report</em> is saved to your account (with detected secrets masked) so it appears in your Projects dashboard; you can delete it at any time. Any auth headers you supply are used for that single scan and never persisted. The only third-party call is to the public <a href="https://osv.dev" target="_blank" rel="noopener noreferrer">OSV.dev</a> database to check dependency versions. See our <a href="/privacy.html">Privacy Policy</a> for details.</p></div>
         </details>
         <details class="faq-item" name="faq">
           <summary>How is the score calculated? <span class="faq-chev" aria-hidden="true"></span></summary>
@@ -894,10 +894,10 @@
       <a href="/methodology" data-route>VAPT methodology</a>
       <a href="/privacy.html">Privacy</a>
       <a href="/terms.html">Terms</a>
-      <a href="mailto:support@sentryscan.app">Contact</a>
-      <a href="mailto:support@sentryscan.app?subject=Bug%20report">Report a bug</a>
+      <a href="mailto:connect@arjusingh.com">Contact</a>
+      <a href="mailto:connect@arjusingh.com?subject=Bug%20report">Report a bug</a>
     </nav>
-    <p>© [PLACEHOLDER: Year] SentryScan. All rights reserved.</p>
+    <p>© 2026 SentryScan. All rights reserved. · Designed &amp; developed by <strong>arjusingh</strong> · Contact: <a href="mailto:connect@arjusingh.com">connect@arjusingh.com</a></p>
   </footer>
 
   <!-- GDPR cookie-consent banner -->

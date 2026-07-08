@@ -2,7 +2,9 @@
 // fetch with timeout, and a uniform finding shape).
 import { URL } from 'node:url';
 import { isIP } from 'node:net';
+import dns from 'node:dns';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { Agent } from 'undici';
 
 export const USER_AGENT = 'SentryScan/2.0 (+website-tester)';
 export const DEFAULT_TIMEOUT = 12000;
@@ -124,16 +126,32 @@ function isPrivateIp(host) {
   return false;
 }
 
+const META_ERR = 'Scanning of cloud metadata endpoints is not allowed.';
+const LOCAL_ERR = 'Scanning of localhost / private network addresses is not allowed. Set SENTRYSCAN_ALLOW_LOCAL=1 to scan your own local/dev servers.';
+
+// Throw if a *resolved IP literal* points at metadata / loopback / private space.
+// This is the authoritative check — it runs on the address we actually connect
+// to, so it can't be fooled by a public hostname that resolves to an internal IP.
+function assertIpAllowed(ip, allowLocal) {
+  const h = String(ip || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/^::ffff:/, '');
+  if (h === '169.254.169.254') throw new Error(META_ERR);
+  if (allowLocal) return;
+  if (isPrivateIp(h)) throw new Error(LOCAL_ERR);
+}
+
 // The host-level SSRF check, shared by normalizeUrl (user input) and the redirect
-// follower (each hop). Throws when a host must not be reached. `allowLocal` mirrors
-// the SENTRYSCAN_ALLOW_LOCAL opt-in for scanning your own dev servers.
+// follower (each hop). This is the FAST pre-check on the hostname *string* — it
+// rejects obvious internal names and IP literals up-front. The authoritative
+// defense against DNS-name bypass / rebind is the connect-time IP validation in
+// `ssrfAgent` below, which every fetchWithTimeout() call routes through.
+// `allowLocal` mirrors the SENTRYSCAN_ALLOW_LOCAL opt-in for scanning dev servers.
 export function assertHostAllowed(host, allowLocal = process.env.SENTRYSCAN_ALLOW_LOCAL === '1') {
   const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
 
   // Cloud metadata endpoints are ALWAYS blocked — an SSRF to these leaks
   // credentials, and there is no legitimate reason to scan them.
   if (h === '169.254.169.254' || h === 'metadata.google.internal') {
-    throw new Error('Scanning of cloud metadata endpoints is not allowed.');
+    throw new Error(META_ERR);
   }
 
   if (allowLocal) return;
@@ -145,9 +163,31 @@ export function assertHostAllowed(host, allowLocal = process.env.SENTRYSCAN_ALLO
     h.endsWith('.local') ||
     h.endsWith('.internal')
   ) {
-    throw new Error('Scanning of localhost / private network addresses is not allowed. Set SENTRYSCAN_ALLOW_LOCAL=1 to scan your own local/dev servers.');
+    throw new Error(LOCAL_ERR);
   }
 }
+
+// A net.lookup-compatible resolver that validates EVERY resolved A/AAAA record
+// against the SSRF blocklist and then pins the connection to the vetted address.
+// Because undici connects to exactly the IP we hand back, a DNS record that
+// resolves to an internal IP (localtest.me, *.nip.io, attacker A-records) is
+// rejected here, and a rebind between check and connect can't slip through.
+function guardedLookup(hostname, options, callback) {
+  const allowLocal = process.env.SENTRYSCAN_ALLOW_LOCAL === '1';
+  dns.lookup(hostname, { all: true, verbatim: true }, (err, addresses) => {
+    if (err) return callback(err);
+    const list = Array.isArray(addresses) ? addresses : [addresses];
+    try { for (const a of list) assertIpAllowed(a.address, allowLocal); }
+    catch (e) { return callback(e); }
+    if (options && options.all) return callback(null, list);
+    const first = list[0];
+    return callback(null, first.address, first.family);
+  });
+}
+
+// Shared undici dispatcher used by every outbound scan/export request. The custom
+// `lookup` enforces the SSRF IP check at socket-connect time (see guardedLookup).
+const ssrfAgent = new Agent({ connect: { lookup: guardedLookup } });
 
 export function normalizeUrl(input) {
   let raw = String(input || '').trim();
@@ -175,8 +215,9 @@ export async function fetchWithTimeout(url, opts = {}) {
     // an internal host) and native `fetch` would follow it blindly, defeating the
     // guard that only saw the original user-supplied URL. Non-follow callers
     // (redirect: 'manual'/'error') keep native behavior.
+    const dispatcher = opts.dispatcher || ssrfAgent; // connect-time SSRF IP guard
     if (!wantFollow) {
-      const res = await fetch(url, { ...opts, signal: ctrl.signal, redirect: opts.redirect, headers });
+      const res = await fetch(url, { ...opts, signal: ctrl.signal, redirect: opts.redirect, headers, dispatcher });
       res._elapsedMs = Date.now() - start;
       return res;
     }
@@ -184,7 +225,7 @@ export async function fetchWithTimeout(url, opts = {}) {
     let current = String(url);
     let res;
     for (let hop = 0; hop <= 5; hop++) {
-      res = await fetch(current, { ...opts, signal: ctrl.signal, redirect: 'manual', headers });
+      res = await fetch(current, { ...opts, signal: ctrl.signal, redirect: 'manual', headers, dispatcher });
       const loc = res.status >= 300 && res.status < 400 && res.headers.get('location');
       if (!loc) break;
       if (hop === 5) break; // give up after 5 redirects; return the 3xx as-is

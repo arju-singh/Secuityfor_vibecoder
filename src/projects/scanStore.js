@@ -1,7 +1,7 @@
 // Persistent per-user scan store (JSON file), mirroring the user/schedule stores.
 // Each saved scan keeps enough to rebuild the report view and to aggregate a
 // project dashboard. Single-node; swap for a real DB to scale.
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -20,7 +20,11 @@ function load() {
 }
 function save(map) {
   if (!existsSync(DIR)) mkdirSync(DIR, { recursive: true });
-  writeFileSync(FILE, JSON.stringify(map), { mode: 0o600 });
+  // Atomic write: serialize to a temp file, then rename over the target. A crash
+  // mid-write leaves the previous good file intact instead of a truncated one.
+  const tmp = `${FILE}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(map), { mode: 0o600 });
+  renameSync(tmp, FILE);
 }
 
 const norm = (email) => String(email || '').trim().toLowerCase();

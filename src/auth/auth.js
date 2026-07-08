@@ -18,6 +18,11 @@ const TOKEN_TTL_SEC = Number(process.env.JWT_TTL_SECONDS) || 2 * 60 * 60; // 2h
 
 let SECRET = process.env.JWT_SECRET;
 if (!SECRET) {
+  // In production a missing secret is fatal: a random per-process key silently
+  // invalidates every session on restart and breaks multi-instance deploys.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('[auth] JWT_SECRET is required in production — set it to a long random value.');
+  }
   SECRET = crypto.randomBytes(32).toString('hex');
   console.warn('[auth] JWT_SECRET not set — using a random secret; sessions will reset on restart. Set JWT_SECRET in production.');
 }

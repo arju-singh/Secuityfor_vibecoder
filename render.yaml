@@ -34,6 +34,11 @@ services:
       # Behind Render's proxy — trust it so client IPs (rate limiting) are correct.
       - key: TRUST_PROXY
         value: "true"
+      # Run the in-process scheduler so recurring scans actually auto-execute on
+      # this always-on instance (checks due schedules every ~5 min). No external
+      # cron or SCHEDULER_TOKEN needed for this path.
+      - key: ENABLE_SCHEDULER
+        value: "1"
       # Set your deployed URL after the first deploy (used in email links, OAuth
       # redirects, etc.). e.g. https://sentryscan.onrender.com
       - key: APP_URL

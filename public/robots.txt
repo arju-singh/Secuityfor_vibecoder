@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /api/
 
-Sitemap: https://YOUR-DOMAIN.example/sitemap.xml
+Sitemap: https://sentryscan.onrender.com/sitemap.xml
