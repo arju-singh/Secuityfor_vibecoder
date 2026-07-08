@@ -135,6 +135,18 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; }
 }
 .nav-cta:hover { transform: translateY(-1px); filter: brightness(1.08); color: #fff; }
 
+/* Header plan pill: neutral for Free, accent-gradient for a paid plan. */
+.plan-badge {
+  display: inline-block; padding: 2px 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; letter-spacing: .02em; line-height: 1.5;
+  color: var(--muted, #9aa4bf); border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.04); vertical-align: middle; white-space: nowrap;
+}
+.plan-badge.is-paid {
+  color: #fff; border-color: transparent; background: var(--grad);
+  box-shadow: 0 6px 16px -8px rgba(91, 139, 255, 0.9);
+}
+
 /* ============================================================================
    Layout
    ========================================================================== */

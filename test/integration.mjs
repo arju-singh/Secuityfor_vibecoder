@@ -18,9 +18,8 @@ import { isEmailConfigured, sendMail } from '../src/email/mailer.js';
 import { isGoogleConfigured } from '../src/auth/oauth.js';
 import { parseRepoUrl, safeExtract } from '../src/scanners/githubScanner.js';
 import AdmZip from 'adm-zip';
-import { isConfigured as billingConfigured, planChangeFromEvent, createCheckoutSession, createPortalSession } from '../src/billing/billing.js';
 import crypto from 'node:crypto';
-import { putUser, setUserPlan, getUser, updateUser, findByCustomerId } from '../src/auth/store.js';
+import { putUser, setUserPlan, getUser, updateUser } from '../src/auth/store.js';
 import { runWithAuth, fetchWithTimeout } from '../src/scanners/util.js';
 import { scanVapt } from '../src/scanners/vaptScanner.js';
 import { maskSecrets, maskFinding } from '../src/analytics/mask.js';
@@ -348,32 +347,23 @@ try {
   assert(ents.some((e) => e.path === 'app.js'), 'safeExtract strips the archive top folder');
   assert(!ents.some((e) => e.path.includes('node_modules')), 'safeExtract skips node_modules');
 
-  // --- 9) Billing (Stripe) — config guard, event mapping, plan store ------
-  console.log('\n[9] Billing:');
-  assert(billingConfigured() === false, 'billing reports not-configured without STRIPE_SECRET_KEY');
-  let threw = false;
-  try { await createCheckoutSession('a@b.com', 'pro', 'http://x'); } catch (e) { threw = e.status === 503; }
-  assert(threw, 'checkout refuses cleanly (503) when billing is not configured');
-  const chg = planChangeFromEvent({ type: 'checkout.session.completed', data: { object: { metadata: { email: 'pay@test.com', plan: 'pro' } } } });
-  assert(chg && chg.email === 'pay@test.com' && chg.plan === 'pro', 'maps checkout.session.completed -> plan change');
-  assert(planChangeFromEvent({ type: 'invoice.paid', data: { object: {} } }) === null, 'ignores unrelated events');
+  // --- 9) Plan persistence in the user store (billing itself is covered in [14]) --
+  console.log('\n[9] Plan store:');
   putUser('plan@test.com', 'x');
-  setUserPlan('plan@test.com', 'pro');
-  assert(getUser('plan@test.com').plan === 'pro', 'webhook plan update persists to the user store');
-  let portalThrew = false;
-  try { await createPortalSession('cus_x', 'http://x'); } catch (e) { portalThrew = e.status === 503; }
-  assert(portalThrew, 'billing portal refuses cleanly (503) when not configured');
-  const chgC = planChangeFromEvent({ type: 'checkout.session.completed', data: { object: { customer: 'cus_42', metadata: { email: 'c@test.com', plan: 'team' } } } });
-  assert(chgC && chgC.customerId === 'cus_42', 'checkout event carries the Stripe customer id');
+  setUserPlan('plan@test.com', 'pro', new Date(Date.now() + 86400000).toISOString());
+  assert(getUser('plan@test.com').plan === 'pro', 'setUserPlan persists the plan to the user store');
+  assert(!!getUser('plan@test.com').planExpiresAt, 'setUserPlan records the expiry timestamp');
+  setUserPlan('plan@test.com', 'free', null);
+  assert(getUser('plan@test.com').plan === 'free' && !('planExpiresAt' in getUser('plan@test.com')), 'dropping to free clears the expiry');
 
   // --- 10) Launch features: store, single-use tokens, email/OAuth guards ---
   console.log('\n[10] Launch features (store / tokens / email / OAuth):');
   // Store helpers
   putUser('store@test.com', 'h0');
   assert(getUser('store@test.com').emailVerified === false, 'putUser defaults emailVerified=false');
-  updateUser('store@test.com', { stripeCustomerId: 'cus_777', emailVerified: true });
+  updateUser('store@test.com', { plan: 'pro', emailVerified: true });
   assert(getUser('store@test.com').emailVerified === true, 'updateUser merges fields');
-  assert(findByCustomerId('cus_777').email === 'store@test.com', 'findByCustomerId locates the user');
+  assert(getUser('store@test.com').plan === 'pro', 'updateUser merges a second field in the same call');
   updateUser('store@test.com', { verifyNonce: 'abc' });
   updateUser('store@test.com', { verifyNonce: null });
   assert(!('verifyNonce' in getUser('store@test.com')), 'updateUser(null) clears a field');

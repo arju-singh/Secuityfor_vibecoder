@@ -55,14 +55,6 @@ export function updateUser(email, patch) {
   return users[key];
 }
 
-// Look up a user by their Stripe customer id (used by the billing webhook when an
-// event carries the customer but not the email, e.g. subscription cancellation).
-export function findByCustomerId(customerId) {
-  if (!customerId) return null;
-  const users = load();
-  return Object.values(users).find((u) => u.stripeCustomerId === customerId) || null;
-}
-
 // Update a user's plan (called only from a verified payment signature/webhook).
 // `expiresAt` (ISO) stamps when a paid plan lapses back to free; pass null to
 // clear it (e.g. when dropping to free).

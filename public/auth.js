@@ -14,6 +14,7 @@
   const emailLabel = $('nav-email');
   const logoutBtn = $('nav-logout');
   const billingBtn = $('nav-billing');
+  const planBadge = $('nav-plan');
   const form = $('auth-form');
   const emailInput = $('auth-email');
   const pwInput = $('auth-password');
@@ -63,7 +64,26 @@
   // Billing visibility depends on BOTH the user's plan and the server config,
   // which load independently — recompute it whenever either becomes available.
   function applyBilling() {
-    if (billingBtn) billingBtn.hidden = !(cfg.billingEnabled && currentUser && currentUser.plan && currentUser.plan !== 'free');
+    const paid = currentUser && currentUser.plan && currentUser.plan !== 'free';
+    if (billingBtn) billingBtn.hidden = !(cfg.billingEnabled && paid);
+    renderPlanBadge();
+  }
+  // Small header pill: "Pro · renews 7 Aug" for a paid plan, "Free" otherwise.
+  function renderPlanBadge() {
+    if (!planBadge) return;
+    if (!currentUser) { planBadge.hidden = true; return; }
+    const plan = (currentUser.plan || 'free');
+    const nice = plan.charAt(0).toUpperCase() + plan.slice(1);
+    let text = nice;
+    if (plan !== 'free' && currentUser.planExpiresAt) {
+      const d = new Date(currentUser.planExpiresAt);
+      if (!isNaN(d)) text += ' · renews ' + d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    }
+    planBadge.textContent = text;
+    planBadge.classList.toggle('is-paid', plan !== 'free');
+    planBadge.title = plan === 'free' ? 'Free plan — upgrade to unlock VAPT, GitHub scans, analytics and more.'
+      : `${nice} plan${currentUser.planExpiresAt ? ' · active until ' + new Date(currentUser.planExpiresAt).toLocaleDateString() : ''}`;
+    planBadge.hidden = false;
   }
   function signedIn(user) {
     currentUser = user;
@@ -77,6 +97,7 @@
     if (signinBtn) signinBtn.hidden = false;
     if (account) account.hidden = true;
     if (billingBtn) billingBtn.hidden = true;
+    if (planBadge) planBadge.hidden = true;
     publishAuth(null);
   }
 
