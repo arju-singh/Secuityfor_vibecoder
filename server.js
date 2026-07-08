@@ -28,12 +28,12 @@ import { securityHeaders } from './src/middleware/security.js';
 import { rateLimit, clientKey } from './src/middleware/rateLimit.js';
 import { validate, websiteSchema, apiSchema, credentialsSchema, githubSchema, vaptSchema, billingSchema, forgotSchema, resetSchema } from './src/middleware/validate.js';
 import { hashPassword, verifyPassword, issueToken, verifyToken, signScoped, verifyScoped, setAuthCookie, clearAuthCookie, requireAuth } from './src/auth/auth.js';
-import { getUser, hasUser, putUser, setUserPlan, updateUser, findByCustomerId } from './src/auth/store.js';
+import { getUser, hasUser, putUser, setUserPlan, updateUser } from './src/auth/store.js';
 import { checkLock, recordFailure, recordSuccess } from './src/auth/bruteforce.js';
 import { createToken, consumeToken } from './src/auth/tokens.js';
 import { isEmailConfigured, sendMail, verificationEmail, resetEmail } from './src/email/mailer.js';
 import { isGoogleConfigured, getAuthUrl, exchangeCode } from './src/auth/oauth.js';
-import { isConfigured as billingConfigured, createCheckoutSession, createPortalSession, constructEvent, planChangeFromEvent } from './src/billing/billing.js';
+import { isConfigured as billingConfigured, publicKeyId, catalog as planCatalog, createOrder, fetchOrder, planFromOrder, verifyPaymentSignature, verifyWebhookSignature, isWebhookConfigured, planGrantFromEvent, expiryFromNow, effectivePlan, planHasCap, isValidPlan, PLANS } from './src/billing/razorpay.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -136,7 +136,7 @@ app.post('/api/auth/login', authLimiter, validate(credentialsSchema), async (req
   setAuthCookie(req, res, issueToken(user.email));
   // Include plan/emailVerified so the UI can show the right billing controls
   // immediately after login, without waiting for a full page reload.
-  res.json({ ok: true, user: { email: user.email, plan: user.plan || 'free', emailVerified: !!user.emailVerified } });
+  res.json({ ok: true, user: { email: user.email, plan: effectivePlan(user), planExpiresAt: user.planExpiresAt || null, emailVerified: !!user.emailVerified } });
 });
 
 app.post('/api/auth/logout', (req, res) => {
@@ -156,7 +156,7 @@ app.get('/api/auth/session', (req, res) => {
   res.json({
     ok: true,
     authenticated: !!payload,
-    user: payload ? { email: payload.sub, plan: (user && user.plan) || 'free', emailVerified: !!(user && user.emailVerified) } : null
+    user: payload ? { email: payload.sub, plan: effectivePlan(user), planExpiresAt: (user && user.planExpiresAt) || null, emailVerified: !!(user && user.emailVerified) } : null
   });
 });
 
@@ -243,6 +243,8 @@ app.get('/api/config', (req, res) => {
     ok: true,
     googleEnabled: isGoogleConfigured(),
     billingEnabled: billingConfigured(),
+    razorpayKeyId: billingConfigured() ? publicKeyId() : null,
+    plans: planCatalog(),
     emailEnabled: isEmailConfigured(),
     supportEmail: process.env.SUPPORT_EMAIL || 'support@sentryscan.app',
     analytics: {
@@ -253,52 +255,113 @@ app.get('/api/config', (req, res) => {
   });
 });
 
-// --- Billing (Stripe Checkout) — skips cleanly until STRIPE_SECRET_KEY is set --
+// Middleware factory: allow the request only if the signed-in user's effective
+// plan includes `cap`; otherwise 402 with an upgrade hint the UI can act on.
+// Must run AFTER `gate`/requireAuth so req.user is populated.
+function requireCap(cap) {
+  return (req, res, next) => {
+    const u = req.user && req.user.email ? getUser(req.user.email) : null;
+    const plan = effectivePlan(u);
+    if (planHasCap(plan, cap)) return next();
+    return res.status(402).json({
+      ok: false, upgrade: true, feature: cap, plan,
+      error: 'This feature requires a higher plan. Upgrade to unlock it.'
+    });
+  };
+}
+
+// The effective plan for the current request's user (free if anonymous/lapsed).
+function currentPlan(req) {
+  const u = req.user && req.user.email ? getUser(req.user.email) : null;
+  return effectivePlan(u);
+}
+
+// Per-request scan-option gates that can't be expressed as route middleware:
+// authenticated scans (auth headers) need `authscan`; API fuzzing needs `fuzz`.
+// Returns a 402 body to send, or null when the plan is entitled.
+function scanCapBlock(req, { headers, fuzz } = {}) {
+  const plan = currentPlan(req);
+  const hasHeaders = headers && (Array.isArray(headers) ? headers.length
+    : typeof headers === 'object' ? Object.keys(headers).length
+    : String(headers).trim().length);
+  if (hasHeaders && !planHasCap(plan, 'authscan')) {
+    return { ok: false, upgrade: true, feature: 'authscan', plan, error: 'Authenticated scans (custom auth headers) require the Starter plan or higher.' };
+  }
+  if (fuzz && !planHasCap(plan, 'fuzz')) {
+    return { ok: false, upgrade: true, feature: 'fuzz', plan, error: 'API fuzzing requires the Pro plan or higher.' };
+  }
+  return null;
+}
+
+// --- Billing (Razorpay Checkout) — skips cleanly until RAZORPAY_KEY_ID is set --
+// Current plan + expiry for the signed-in user (effective plan, so a lapsed paid
+// plan reads as free).
 app.get('/api/billing/plan', requireAuth, (req, res) => {
   const u = getUser(req.user.email);
-  res.json({ ok: true, plan: (u && u.plan) || 'free', billingEnabled: billingConfigured() });
+  res.json({
+    ok: true,
+    plan: effectivePlan(u),
+    planExpiresAt: (u && u.planExpiresAt) || null,
+    billingEnabled: billingConfigured(),
+    plans: planCatalog()
+  });
 });
 
-// Start a hosted Checkout session (must be logged in).
-app.post('/api/billing/checkout', requireAuth, validate(billingSchema), async (req, res) => {
+// Create a Razorpay Order for a plan. The browser opens Checkout with this order
+// id; payment is confirmed by the /verify step below (never trusted from the UI).
+app.post('/api/billing/order', requireAuth, validate(billingSchema), async (req, res) => {
   try {
-    const origin = `${req.protocol}://${req.get('host')}`;
-    const session = await createCheckoutSession(req.user.email, req.body.plan, origin);
-    res.json({ ok: true, url: session.url });
+    const order = await createOrder(req.body.plan, req.user.email);
+    res.json({ ok: true, ...order, name: 'SentryScan', email: req.user.email });
   } catch (e) {
     res.status(e.status || 400).json({ ok: false, error: e.message });
   }
 });
 
-// Open the Stripe customer portal for self-service upgrade / downgrade / cancel.
-app.post('/api/billing/portal', requireAuth, async (req, res) => {
-  try {
-    const u = getUser(req.user.email);
-    const session = await createPortalSession(u && u.stripeCustomerId, `${appBaseUrl(req)}/?billing=portal`);
-    res.json({ ok: true, url: session.url });
-  } catch (e) {
-    res.status(e.status || 400).json({ ok: false, error: e.message });
+// Confirm a payment: verify the Razorpay signature (HMAC with the secret key) and,
+// only if valid, grant the plan for the billing period. This — not the browser —
+// is the source of truth for a paid plan.
+app.post('/api/billing/verify', requireAuth, async (req, res) => {
+  const { razorpay_order_id: orderId, razorpay_payment_id: paymentId, razorpay_signature: signature } = req.body || {};
+  if (!orderId || !paymentId || !signature) {
+    return res.status(400).json({ ok: false, error: 'Incomplete payment confirmation.' });
   }
-});
-
-// Stripe webhook — signature-verified; the ONLY thing that grants a paid plan.
-app.post('/api/billing/webhook', express.raw({ type: '*/*' }), (req, res) => {
-  let event;
-  try {
-    event = constructEvent(req.body, req.headers['stripe-signature']);
-  } catch (e) {
-    return res.status(400).json({ ok: false, error: `Webhook signature verification failed: ${e.message}` });
+  // 1) The signature proves Razorpay processed this exact order+payment.
+  if (!verifyPaymentSignature(orderId, paymentId, signature)) {
+    console.warn('[billing] rejected payment with bad signature', { orderId, email: req.user.email });
+    return res.status(400).json({ ok: false, error: 'Payment could not be verified.' });
   }
-  const change = planChangeFromEvent(event);
-  if (change) {
-    // Cancellation events may carry the customer but not the email — resolve it.
-    let email = change.email;
-    if (!email && change.customerId) { const u = findByCustomerId(change.customerId); email = u && u.email; }
-    if (email) {
-      setUserPlan(email, change.plan);
-      if (change.customerId) updateUser(email, { stripeCustomerId: change.customerId });
+  try {
+    // 2) The signature does NOT bind the plan, so resolve the plan from the ORDER
+    //    (server-created), never from the client — and confirm the order belongs
+    //    to this user and was actually paid. This blocks paying for a cheap tier
+    //    then claiming a higher one.
+    const order = await fetchOrder(orderId);
+    const { plan, email } = planFromOrder(order);
+    if (email && email.toLowerCase() !== req.user.email.toLowerCase()) {
+      return res.status(403).json({ ok: false, error: 'This payment belongs to a different account.' });
     }
+    if (order.status !== 'paid') {
+      return res.status(400).json({ ok: false, error: 'Payment is not complete yet.' });
+    }
+    const u = setUserPlan(req.user.email, plan, expiryFromNow());
+    res.json({ ok: true, plan: effectivePlan(u), planExpiresAt: u && u.planExpiresAt });
+  } catch (e) {
+    res.status(e.status || 502).json({ ok: false, error: e.message });
   }
+});
+
+// Razorpay webhook — signature-verified (defense-in-depth alongside /verify).
+// The ONLY server-to-server path that can grant a plan; forged bodies are rejected.
+app.post('/api/billing/webhook', express.raw({ type: '*/*' }), (req, res) => {
+  if (!isWebhookConfigured()) return res.status(503).json({ ok: false, error: 'Webhook not configured.' });
+  const raw = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : String(req.body || '');
+  if (!verifyWebhookSignature(raw, req.headers['x-razorpay-signature'])) {
+    return res.status(400).json({ ok: false, error: 'Invalid webhook signature.' });
+  }
+  let event; try { event = JSON.parse(raw); } catch { return res.status(400).json({ ok: false, error: 'Bad payload.' }); }
+  const grant = planGrantFromEvent(event);
+  if (grant && grant.email) setUserPlan(grant.email, grant.plan, expiryFromNow());
   res.json({ received: true });
 });
 
@@ -511,6 +574,8 @@ function persistScan(req, report) {
 // --- Full website test: UI health + security + render ----------------------
 // scanLimiter throttles expensive scans; validate() enforces the request schema.
 app.post('/api/test/website', gate, scanLimiter, validate(websiteSchema), async (req, res) => {
+  const block = scanCapBlock(req, { headers: req.body.headers });
+  if (block) return res.status(402).json(block);
   try {
     const report = await performWebsiteScan({
       url: req.body.url, render: req.body.render, audits: req.body.audits, vapt: req.body.vapt,
@@ -524,6 +589,8 @@ app.post('/api/test/website', gate, scanLimiter, validate(websiteSchema), async 
 
 // --- API test --------------------------------------------------------------
 app.post('/api/test/api', gate, scanLimiter, validate(apiSchema), async (req, res) => {
+  const block = scanCapBlock(req, { headers: req.body.headers, fuzz: req.body.fuzz });
+  if (block) return res.status(402).json(block);
   try {
     const report = await performApiScan({
       url: req.body.url, headers: req.body.headers, fuzz: req.body.fuzz, access: req.body.access,
@@ -540,7 +607,7 @@ app.post('/api/test/api', gate, scanLimiter, validate(apiSchema), async (req, re
 // --- Full VAPT assessment --------------------------------------------------
 // Runs the entire scanner battery against one target and returns one combined,
 // OWASP-mapped report. allowWrite unlocks the state-changing probes.
-app.post('/api/test/vapt', gate, scanLimiter, validate(vaptSchema), async (req, res) => {
+app.post('/api/test/vapt', gate, requireCap('vapt'), scanLimiter, validate(vaptSchema), async (req, res) => {
   try {
     const report = await performVaptScan({
       url: req.body.url, headers: req.body.headers,
@@ -575,7 +642,7 @@ async function buildCodeSections(entries, effort = 'extended') {
 }
 
 // --- Source-code scan (upload) ---------------------------------------------
-app.post('/api/scan/files', gate, fileLimiter, upload.any(), async (req, res) => {
+app.post('/api/scan/files', gate, requireCap('code'), fileLimiter, upload.any(), async (req, res) => {
   try {
     const files = req.files || [];
     if (!files.length) return res.status(400).json({ ok: false, error: 'No files were uploaded.' });
@@ -624,7 +691,7 @@ function parsePathsField(v) {
 
 // --- Source-code scan (GitHub repo) ----------------------------------------
 // SSRF-safe (host hard-coded to GitHub) + bomb-safe (size/entry caps).
-app.post('/api/scan/github', gate, fileLimiter, validate(githubSchema), async (req, res) => {
+app.post('/api/scan/github', gate, requireCap('github'), fileLimiter, validate(githubSchema), async (req, res) => {
   try {
     const report = await performGithubScan({ url: req.body.url, effort: req.body.effort, paths: req.body.paths });
     res.json(persistScan(req, report));
@@ -638,7 +705,7 @@ app.post('/api/scan/github', gate, fileLimiter, validate(githubSchema), async (r
 // browser can't POST cross-origin to an arbitrary host, and validated through
 // the SAME SSRF guard (normalizeUrl) used for scan targets so this endpoint
 // can't be abused to reach localhost / cloud-metadata / private ranges.
-app.post('/api/export/webhook', gate, scanLimiter, async (req, res) => {
+app.post('/api/export/webhook', gate, requireCap('export_integrations'), scanLimiter, async (req, res) => {
   const { url, report } = req.body || {};
   if (!url || typeof url !== 'string') {
     return res.status(400).json({ ok: false, error: 'A webhook URL is required.' });
@@ -712,7 +779,7 @@ function slackPayload(report) {
 // JIRA_PROJECT_KEY) and may be overridden per-request. The base URL is run
 // through normalizeUrl (SSRF guard) exactly like a scan target.
 const JIRA_SEV_PRIORITY = { critical: 'Highest', high: 'High', medium: 'Medium', low: 'Low', info: 'Lowest' };
-app.post('/api/export/jira', gate, scanLimiter, async (req, res) => {
+app.post('/api/export/jira', gate, requireCap('export_integrations'), scanLimiter, async (req, res) => {
   const b = req.body || {};
   const baseUrl = b.baseUrl || process.env.JIRA_BASE_URL;
   const email = b.email || process.env.JIRA_EMAIL;
@@ -877,7 +944,7 @@ app.delete('/api/scans/:id', requireAuth, (req, res) => {
 // Aggregate analytics ("VART") across all of the signed-in user's saved scans.
 // Owner-scoped and auth-only (never a public/shareable URL); computed purely from
 // stored data with no external calls; every finding it returns is secret-masked.
-app.get('/api/analytics', requireAuth, (req, res) => {
+app.get('/api/analytics', requireAuth, requireCap('analytics'), (req, res) => {
   try {
     res.json(buildAnalytics(req.user.email));
   } catch (e) {
@@ -984,7 +1051,7 @@ app.get('/api/schedule', requireAuth, (req, res) => {
   res.json({ ok: true, schedules: listSchedules(req.user.email).map(redactSchedule) });
 });
 
-app.post('/api/schedule', requireAuth, scanLimiter, (req, res) => {
+app.post('/api/schedule', requireAuth, requireCap('schedule'), scanLimiter, (req, res) => {
   const existingCount = listSchedules(req.user.email).length;
   if (existingCount >= SCHEDULE_MAX_PER_USER) {
     return res.status(429).json({ ok: false, error: `Schedule limit reached (${SCHEDULE_MAX_PER_USER}). Delete one first.` });

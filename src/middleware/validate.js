@@ -110,7 +110,7 @@ export const vaptSchema = {
 };
 
 export const billingSchema = {
-  plan: { type: 'string', required: true, maxLength: 10, enum: ['pro', 'team'] }
+  plan: { type: 'string', required: true, maxLength: 10, enum: ['starter', 'pro', 'business'] }
 };
 
 export const credentialsSchema = {

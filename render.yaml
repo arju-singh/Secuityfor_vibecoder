@@ -45,14 +45,13 @@ services:
         sync: false
 
       # ---- Optional integrations — leave blank to keep them disabled ----------
-      # Stripe billing (test keys until you go live):
-      - key: STRIPE_SECRET_KEY
+      # Razorpay billing (INR plans 599/899/1999). Set the key id + secret to
+      # enable checkout; the webhook secret is optional (defense-in-depth).
+      - key: RAZORPAY_KEY_ID
         sync: false
-      - key: STRIPE_WEBHOOK_SECRET
+      - key: RAZORPAY_KEY_SECRET
         sync: false
-      - key: STRIPE_PRICE_PRO
-        sync: false
-      - key: STRIPE_PRICE_TEAM
+      - key: RAZORPAY_WEBHOOK_SECRET
         sync: false
       # Transactional email (verification / password reset):
       - key: RESEND_API_KEY

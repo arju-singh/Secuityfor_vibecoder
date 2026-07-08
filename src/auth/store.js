@@ -63,13 +63,18 @@ export function findByCustomerId(customerId) {
   return Object.values(users).find((u) => u.stripeCustomerId === customerId) || null;
 }
 
-// Update a user's plan (called only from the verified Stripe webhook).
-export function setUserPlan(email, plan) {
+// Update a user's plan (called only from a verified payment signature/webhook).
+// `expiresAt` (ISO) stamps when a paid plan lapses back to free; pass null to
+// clear it (e.g. when dropping to free).
+export function setUserPlan(email, plan, expiresAt) {
   const users = load();
   const key = norm(email);
   if (!users[key]) return null;
   users[key].plan = plan;
   users[key].planUpdatedAt = new Date().toISOString();
+  if (expiresAt === undefined) { /* leave existing expiry untouched */ }
+  else if (expiresAt === null) delete users[key].planExpiresAt;
+  else users[key].planExpiresAt = expiresAt;
   save(users);
   return users[key];
 }

@@ -146,32 +146,68 @@
     signedOut();
   });
 
-  // Manage subscription — open the Stripe customer portal.
-  if (billingBtn) billingBtn.addEventListener('click', async () => {
-    try {
-      const res = await fetch('/api/billing/portal', { method: 'POST', credentials: 'same-origin' });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.url) { window.location.href = data.url; return; }
-      alert(data.error || 'Could not open the billing portal.');
-    } catch { alert('Network error opening the billing portal.'); }
+  // Manage plan — jump to pricing (renew / upgrade). Razorpay is a modal flow,
+  // so there's no hosted portal; the pricing section is where users re-purchase.
+  if (billingBtn) billingBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    try { history.replaceState(null, '', '/#pricing'); } catch { /* noop */ }
+    const el = document.getElementById('pricing');
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
   });
 
-  // Pricing → Stripe Checkout. Requires login; redirects to Stripe's hosted page.
+  // Pricing → Razorpay Checkout. Requires login. Creates an order server-side,
+  // opens the hosted modal, then verifies the signed result server-side before
+  // the plan is granted (the browser never self-reports success).
   document.querySelectorAll('.price-cta[data-plan]').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
       const plan = btn.dataset.plan;
       const sess = await fetch('/api/auth/session', { credentials: 'same-origin' }).then((r) => r.json()).catch(() => ({}));
       if (!sess.authenticated) { setMode('register'); openModal(); return; }
+      if (typeof window.Razorpay === 'undefined') { alert('The payment library failed to load. Check your connection and try again.'); return; }
+      const orig = btn.textContent;
+      btn.setAttribute('disabled', 'true'); btn.textContent = 'Starting…';
       try {
-        const res = await fetch('/api/billing/checkout', {
+        const res = await fetch('/api/billing/order', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin', body: JSON.stringify({ plan })
         });
         const data = await res.json().catch(() => ({}));
-        if (res.ok && data.url) { window.location.href = data.url; return; }
-        alert(data.error || 'Checkout is unavailable right now.');
+        if (!res.ok || !data.orderId) { alert(data.error || 'Checkout is unavailable right now.'); return; }
+        const rzp = new window.Razorpay({
+          key: data.keyId,
+          order_id: data.orderId,
+          amount: data.amount,
+          currency: data.currency,
+          name: data.name || 'SentryScan',
+          description: `${data.label} plan — monthly`,
+          prefill: { email: data.email },
+          theme: { color: '#5b8bff' },
+          handler: async (resp) => {
+            try {
+              const v = await fetch('/api/billing/verify', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin', body: JSON.stringify({
+                  razorpay_order_id: resp.razorpay_order_id,
+                  razorpay_payment_id: resp.razorpay_payment_id,
+                  razorpay_signature: resp.razorpay_signature,
+                  plan
+                })
+              }).then((r) => r.json()).catch(() => ({}));
+              if (v.ok) {
+                const s = await fetch('/api/auth/session', { credentials: 'same-origin' }).then((r) => r.json()).catch(() => ({}));
+                if (s && s.user) signedIn(s.user);
+                alert(`You're on ${plan.charAt(0).toUpperCase() + plan.slice(1)} — your plan is active. Thank you!`);
+              } else {
+                alert(v.error || 'We could not verify the payment. If you were charged, contact support with your payment id.');
+              }
+            } catch { alert('Payment verification failed. If you were charged, contact support.'); }
+          }
+        });
+        rzp.on('payment.failed', (r) => { alert('Payment failed: ' + ((r.error && r.error.description) || 'please try again.')); });
+        rzp.open();
       } catch { alert('Network error starting checkout.'); }
+      finally { btn.removeAttribute('disabled'); btn.textContent = orig; }
     });
   });
 

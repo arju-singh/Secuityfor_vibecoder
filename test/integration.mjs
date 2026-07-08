@@ -19,6 +19,7 @@ import { isGoogleConfigured } from '../src/auth/oauth.js';
 import { parseRepoUrl, safeExtract } from '../src/scanners/githubScanner.js';
 import AdmZip from 'adm-zip';
 import { isConfigured as billingConfigured, planChangeFromEvent, createCheckoutSession, createPortalSession } from '../src/billing/billing.js';
+import crypto from 'node:crypto';
 import { putUser, setUserPlan, getUser, updateUser, findByCustomerId } from '../src/auth/store.js';
 import { runWithAuth, fetchWithTimeout } from '../src/scanners/util.js';
 import { scanVapt } from '../src/scanners/vaptScanner.js';
@@ -445,6 +446,37 @@ try {
   assert(isEmailConfigured() === false, 'email reports not-configured without RESEND_API_KEY');
   assert((await sendMail({ to: 'x@y.com', subject: 's', text: 't' })).dev === true, 'sendMail no-ops to dev console when unconfigured');
   assert(isGoogleConfigured() === false, 'Google OAuth reports not-configured without client id/secret');
+
+  console.log('\n[14] Razorpay billing + plan capabilities:');
+  // Configure a dummy key pair, then dynamically import so the module reads them.
+  process.env.RAZORPAY_KEY_ID = 'rzp_test_dummy';
+  process.env.RAZORPAY_KEY_SECRET = 'test_secret_key';
+  const rzp = await import('../src/billing/razorpay.js');
+  assert(rzp.isConfigured() === true, 'razorpay reports configured when key id + secret are set');
+  assert(rzp.PLANS.starter.amount === 59900 && rzp.PLANS.pro.amount === 89900 && rzp.PLANS.business.amount === 199900, 'plan amounts are 599/899/1999 (paise)');
+  assert(rzp.isValidPlan('pro') && !rzp.isValidPlan('team'), 'plan validation matches the catalog');
+  assert(rzp.catalog().length === 3, 'public catalog lists the three paid plans');
+  assert(rzp.planHasCap('free', 'website') && rzp.planHasCap('free', 'api') && !rzp.planHasCap('free', 'code'), 'free: website+api yes, code upload no');
+  assert(rzp.planHasCap('starter', 'code') && rzp.planHasCap('starter', 'authscan') && !rzp.planHasCap('starter', 'vapt'), 'starter unlocks code+authscan, not vapt');
+  assert(rzp.planHasCap('pro', 'vapt') && rzp.planHasCap('pro', 'github') && rzp.planHasCap('pro', 'fuzz') && rzp.planHasCap('pro', 'analytics') && rzp.planHasCap('pro', 'export_integrations'), 'pro unlocks vapt/github/fuzz/analytics/export');
+  assert(!rzp.planHasCap('pro', 'schedule') && rzp.planHasCap('business', 'schedule'), 'scheduling is business-only');
+  assert(rzp.planRank('business') > rzp.planRank('pro') && rzp.planRank('pro') > rzp.planRank('starter') && rzp.planRank('starter') > rzp.planRank('free'), 'plan ranks are strictly ordered');
+  assert(rzp.effectivePlan({ plan: 'pro', planExpiresAt: new Date(Date.now() + 86400000).toISOString() }) === 'pro', 'an active paid plan stays paid');
+  assert(rzp.effectivePlan({ plan: 'pro', planExpiresAt: new Date(Date.now() - 86400000).toISOString() }) === 'free', 'a lapsed paid plan downgrades to free');
+  assert(rzp.effectivePlan({ plan: 'free' }) === 'free', 'free stays free');
+  const oid = 'order_ABC', pid = 'pay_XYZ';
+  const goodSig = crypto.createHmac('sha256', 'test_secret_key').update(`${oid}|${pid}`).digest('hex');
+  assert(rzp.verifyPaymentSignature(oid, pid, goodSig) === true, 'a valid payment signature verifies');
+  assert(rzp.verifyPaymentSignature(oid, pid, 'deadbeef') === false, 'a forged payment signature is rejected');
+  assert(rzp.verifyPaymentSignature('order_other', pid, goodSig) === false, 'signature is bound to the exact order+payment');
+  assert(rzp.planGrantFromEvent({ event: 'payment.captured', payload: { payment: { entity: { notes: { email: 'a@b.com', plan: 'pro' } } } } })?.plan === 'pro', 'webhook payment.captured maps to a plan grant');
+  assert(rzp.planGrantFromEvent({ event: 'payment.failed', payload: {} }) === null, 'non-capture events grant nothing');
+  // Anti-tamper: the granted plan comes from the order (amount-bound), never the client.
+  assert(rzp.planFromOrder({ notes: { plan: 'pro', email: 'a@b.com' }, amount: 89900 }).plan === 'pro', 'planFromOrder reads the plan the order was created for');
+  let mismatchErr = false; try { rzp.planFromOrder({ notes: { plan: 'business' }, amount: 89900 }); } catch { mismatchErr = true; }
+  assert(mismatchErr, 'planFromOrder rejects an amount that does not match the claimed plan (blocks tier bypass)');
+  let unknownErr = false; try { rzp.planFromOrder({ notes: { plan: 'gold' }, amount: 100 }); } catch { unknownErr = true; }
+  assert(unknownErr, 'planFromOrder rejects an unknown plan');
 } finally {
   server.close();
 }
